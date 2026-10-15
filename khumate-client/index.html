@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>KHUMATE - 경희대학교 제2기숙사 룸메이트 매칭</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body class="bg-slate-50 min-h-screen pb-24">
+
+  <!-- 상단 사이트 헤더 -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-20">
+    <div class="max-w-xl mx-auto px-4 py-4 flex justify-between items-center">
+      <div class="flex items-baseline gap-2 flex-wrap">
+        <h1 class="text-2xl font-black tracking-tight text-red-600">KHUMATE</h1>
+        <span class="text-xs font-semibold text-slate-500">경희대학교 제2기숙사 룸메이트 매칭</span>
+      </div>
+      <!-- 데이터 초기화 버튼 -->
+      <button onclick="resetLocalStorageData()" class="text-xs text-slate-400 hover:text-red-600 font-semibold px-2 py-1 rounded-lg border border-slate-200 transition shrink-0">
+        초기화
+      </button>
+    </div>
+
+    <!-- 탭 네비게이션 -->
+    <nav class="max-w-xl mx-auto px-4 flex border-t border-slate-100">
+      <button onclick="switchTab('matching')" id="tab-matching" class="flex-1 py-3 text-sm font-bold text-red-600 border-b-2 border-red-600 transition">MATCHING</button>
+      <button onclick="switchTab('chatting')" id="tab-chatting" class="flex-1 py-3 text-sm font-semibold text-slate-400 hover:text-slate-600 transition">CHATTING</button>
+      <button onclick="switchTab('houserule')" id="tab-houserule" class="flex-1 py-3 text-sm font-semibold text-slate-400 hover:text-slate-600 transition">HOUSERULE</button>
+    </nav>
+  </header>
+
+  <!-- 메인 콘텐츠 영역 -->
+  <main class="max-w-xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- [탭 1] 매칭 화면 -->
+    <div id="content-matching" class="space-y-6">
+      <div onclick="openFilterModal()" class="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm cursor-pointer hover:border-red-300 transition flex justify-between items-center">
+        <div>
+          <span class="text-xs font-bold text-red-600 uppercase tracking-wide">Filter Search</span>
+          <h2 class="text-sm font-bold text-slate-800 mt-0.5">상세 조건 필터링 설정하기</h2>
+        </div>
+        <span class="text-slate-400 text-lg">🔍</span>
+      </div>
+
+      <div class="flex justify-between items-center text-xs font-semibold text-slate-500 px-1">
+        <span>매칭 후보 목록</span>
+        <div class="flex gap-2">
+          <button class="text-red-600 font-bold">최신순</button>
+          <span>·</span>
+          <button class="hover:text-slate-800">연관순</button>
+        </div>
+      </div>
+
+      <!-- 카드 목록 컨테이너 -->
+      <div id="card-list-container" class="space-y-3"></div>
+    </div>
+
+    <!-- [탭 2] 채팅 화면 -->
+    <div id="content-chatting" class="hidden py-20 text-center text-slate-400">
+      <p class="text-lg font-semibold">채팅 기능 준비 중입니다.</p>
+    </div>
+
+    <!-- [탭 3] 하우스룰 화면 -->
+    <div id="content-houserule" class="hidden py-20 text-center text-slate-400">
+      <p class="text-lg font-semibold">하우스룰 게시판 준비 중입니다.</p>
+    </div>
+
+  </main>
+
+  <!-- 하단 고정 내 정보 수정 버튼 -->
+  <div class="fixed bottom-6 left-0 right-0 px-4 z-10 pointer-events-none">
+    <div class="max-w-xl mx-auto flex justify-end">
+      <button onclick="openProfileEdit()" class="pointer-events-auto bg-red-600 hover:bg-red-700 text-white font-bold py-3.5 px-6 rounded-full shadow-lg transition flex items-center gap-2">
+        <span>⚙️</span> 내 정보 수정하기
+      </button>
+    </div>
+  </div>
+
+  <!-- [팝업 1] 필터 모달 -->
+  <div id="filter-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex justify-center items-center p-4">
+    <div class="bg-white w-full max-w-md p-6 rounded-2xl shadow-xl space-y-4">
+      <div class="flex justify-between items-center border-b pb-3">
+        <h3 class="font-bold text-lg text-slate-800">조건 필터 설정</h3>
+        <button onclick="closeFilterModal()" class="text-slate-400 hover:text-slate-600 font-bold">✕</button>
+      </div>
+      <p class="text-sm text-slate-500">상세 필터 옵션 설정 공간입니다.</p>
+      <button onclick="closeFilterModal()" class="w-full py-2.5 bg-slate-900 text-white font-bold rounded-lg">적용하기</button>
+    </div>
+  </div>
+
+  <!-- [팝업 2] 내 정보 수정 모달 (상하단 고정형 레이아웃) -->
+  <div id="profile-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex justify-center items-center p-4">
+    <div class="bg-white w-full max-w-lg rounded-2xl shadow-xl flex flex-col max-h-[85vh] overflow-hidden">
+      
+      <!-- [상단 고정] 모달 헤더 -->
+      <div class="flex justify-between items-center border-b px-6 py-4 bg-white sticky top-0 z-20">
+        <div>
+          <span class="text-xs font-bold text-red-600 uppercase tracking-wide">Profile Settings</span>
+          <h3 class="font-bold text-xl text-slate-800">내 정보 수정하기</h3>
+        </div>
+        <button onclick="closeProfileEdit()" class="text-slate-400 hover:text-slate-600 font-bold text-lg p-1">✕</button>
+      </div>
+
+      <!-- [중간 스크롤 영역] 설문 폼 내용 -->
+      <div class="p-6 space-y-6 overflow-y-auto flex-1">
+
+        <!-- 최상단 독자적 배치: 게시글 제목 -->
+        <div class="bg-red-50/50 p-4 rounded-xl border border-red-200">
+          <label class="block text-xs font-bold text-red-600 mb-1.5">게시글 제목</label>
+          <input type="text" id="post-title" value="룸메이트 구해요" placeholder="예: 룸메이트 구해요" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-red-500 shadow-sm">
+        </div>
+
+        <!-- 카테고리 1: 기본 프로필 -->
+        <div class="space-y-4">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-red-100 text-red-600 font-bold text-xs flex items-center justify-center">1</span>
+            <h4 class="font-bold text-base text-slate-800">기본 프로필</h4>
+          </div>
+
+          <div class="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+
+            <!-- 성별 -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1.5">성별</label>
+              <div class="grid grid-cols-2 gap-2">
+                <label class="radio-box flex items-center justify-center gap-2 p-2.5 bg-white border border-slate-300 rounded-lg text-sm cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="gender" value="남성" class="accent-red-600" checked> 남성
+                </label>
+                <label class="radio-box flex items-center justify-center gap-2 p-2.5 bg-white border border-slate-300 rounded-lg text-sm cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="gender" value="여성" class="accent-red-600"> 여성
+                </label>
+              </div>
+            </div>
+
+            <!-- 기숙사 거주 기간 -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1.5">기숙사 거주 기간</label>
+              <div class="grid grid-cols-3 gap-2">
+                <label class="radio-box flex items-center justify-center py-2 px-1 bg-white border border-slate-300 rounded-lg text-xs font-medium cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="dorm_period" value="한 학기" class="accent-red-600 mr-1" checked> 한 학기
+                </label>
+                <label class="radio-box flex items-center justify-center py-2 px-1 bg-white border border-slate-300 rounded-lg text-xs font-medium cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="dorm_period" value="반년" class="accent-red-600 mr-1"> 반년
+                </label>
+                <label class="radio-box flex items-center justify-center py-2 px-1 bg-white border border-slate-300 rounded-lg text-xs font-medium cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="dorm_period" value="연간(1년)" class="accent-red-600 mr-1"> 연간 (1년)
+                </label>
+              </div>
+            </div>
+
+            <!-- 단과대학 및 학과 검색 -->
+            <div class="grid grid-cols-2 gap-3">
+              <div class="relative">
+                <label class="block text-xs font-semibold text-slate-600 mb-1">단과대학 (검색)</label>
+                <input type="text" id="college-search" placeholder="단과대 검색" onfocus="showCollegeList()" oninput="filterCollegeList()" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
+                <ul id="college-list" class="hidden absolute z-30 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-36 overflow-y-auto text-xs mt-1"></ul>
+              </div>
+
+              <div class="relative">
+                <label class="block text-xs font-semibold text-slate-600 mb-1">학과 (검색)</label>
+                <input type="text" id="dept-search" placeholder="학과 검색" value="전자공학과" onfocus="showDeptList()" oninput="filterDeptList()" class="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
+                <ul id="dept-list" class="hidden absolute z-30 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-36 overflow-y-auto text-xs mt-1"></ul>
+              </div>
+            </div>
+
+            <!-- 학번 및 출생년도 -->
+            <div class="grid grid-cols-2 gap-3">
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">학번 (숫자 2자리)</label>
+                <div class="relative flex items-center">
+                  <input type="number" id="student-id" value="24" placeholder="예: 24" maxlength="2" class="w-full bg-white border border-slate-300 rounded-lg pl-3 pr-10 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
+                  <span class="absolute right-3 text-xs text-slate-400 font-bold pointer-events-none">학번</span>
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1">나이 (출생년도 4자리)</label>
+                <div class="relative flex items-center">
+                  <input type="number" id="user-birthyear" value="2005" placeholder="예: 2005" class="w-full bg-white border border-slate-300 rounded-lg pl-3 pr-8 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500">
+                  <span class="absolute right-3 text-xs text-slate-400 font-bold pointer-events-none">년</span>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- 카테고리 2: 생활 패턴 -->
+        <div class="space-y-4">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-red-100 text-red-600 font-bold text-xs flex items-center justify-center">2</span>
+            <h4 class="font-bold text-base text-slate-800">생활 패턴</h4>
+          </div>
+
+          <div class="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            
+            <!-- 기상 시간 / 취침 시간 -->
+            <div class="grid grid-cols-2 gap-3">
+              
+              <!-- 기상 시간 -->
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1.5">기상 시간</label>
+                <div class="flex items-center gap-2.5 px-1">
+                  <div class="relative flex-1">
+                    <input type="text" id="wake-hour" value="08" readonly onclick="toggleHourDropdown('wake-hour')" class="w-full bg-white border border-slate-300 rounded-lg px-2 py-2 text-sm font-medium text-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-red-500 shadow-sm text-center">
+                    <ul id="wake-hour-list" class="hidden absolute z-30 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-36 overflow-y-auto text-xs mt-1"></ul>
+                  </div>
+                  <span class="font-black text-slate-400 text-base">:</span>
+                  <div class="relative flex-1">
+                    <input type="number" min="0" max="59" value="00" class="w-full bg-white border border-slate-300 rounded-lg px-2 py-2 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500 shadow-sm text-center">
+                  </div>
+                </div>
+              </div>
+
+              <!-- 취침 시간 -->
+              <div>
+                <label class="block text-xs font-semibold text-slate-600 mb-1.5">취침 시간</label>
+                <div class="flex items-center gap-2.5 px-1">
+                  <div class="relative flex-1">
+                    <input type="text" id="sleep-hour" value="23" readonly onclick="toggleHourDropdown('sleep-hour')" class="w-full bg-white border border-slate-300 rounded-lg px-2 py-2 text-sm font-medium text-slate-700 cursor-pointer focus:outline-none focus:ring-2 focus:ring-red-500 shadow-sm text-center">
+                    <ul id="sleep-hour-list" class="hidden absolute z-30 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-36 overflow-y-auto text-xs mt-1"></ul>
+                  </div>
+                  <span class="font-black text-slate-400 text-base">:</span>
+                  <div class="relative flex-1">
+                    <input type="number" min="0" max="59" value="30" class="w-full bg-white border border-slate-300 rounded-lg px-2 py-2 text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-red-500 shadow-sm text-center">
+                  </div>
+                </div>
+              </div>
+
+            </div>
+
+            <!-- 방에 머무는 정도 (재실율) -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1.5">방에 머무는 정도 (재실율)</label>
+              <div class="space-y-2">
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="room_stay" value="high" class="accent-red-600">
+                  <span><b>방콕형</b> (수업 시간 외 대부분 방에 있음)</span>
+                </label>
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="room_stay" value="medium" class="accent-red-600" checked>
+                  <span><b>반반형</b> (적당히 외출하고 적당히 들어옴)</span>
+                </label>
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="room_stay" value="low" class="accent-red-600">
+                  <span><b>외출형</b> (도서관/약속 등으로 주로 밖에 있음)</span>
+                </label>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+
+      <!-- [하단 고정] 저장 및 게시 버튼 -->
+      <div class="border-t px-6 py-4 bg-white sticky bottom-0 z-20 flex gap-2">
+        <button onclick="closeProfileEdit()" class="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl shadow-sm transition">
+          저장하기
+        </button>
+        <button onclick="confirmPublish()" class="flex-1 py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-sm transition">
+          게시하기
+        </button>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- [커스텀 알림/확인 모달 팝업] -->
+  <div id="confirm-modal" class="fixed inset-0 bg-black/50 hidden z-50 flex justify-center items-center p-4">
+    <div class="bg-white w-full max-w-sm p-6 rounded-2xl shadow-xl space-y-4 text-center">
+      <div class="w-12 h-12 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto font-bold text-xl">!</div>
+      <h3 class="font-bold text-lg text-slate-800">게시글 작성 확인</h3>
+      <p class="text-xs text-slate-600 leading-relaxed">
+        정말 게시하시겠습니까?<br>
+        <span class="text-red-600 font-bold">기존에 업로드된 글은 삭제</span>되고 새 글이 작성됩니다.
+      </p>
+      <div class="flex gap-2 pt-2">
+        <button onclick="closeConfirmModal()" class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-sm rounded-xl transition">취소</button>
+        <button onclick="executePublish()" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-xl transition">게시하기</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="script.js" defer></script>
+</body>
+</html>
