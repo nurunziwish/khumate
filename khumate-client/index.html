@@ -251,6 +251,109 @@
           </div>
         </div>
 
+        <!-- 카테고리 3: 소음 및 환경 -->
+        <div class="space-y-4">
+          <div class="flex items-center gap-2">
+            <span class="w-6 h-6 rounded-full bg-red-100 text-red-600 font-bold text-xs flex items-center justify-center">3</span>
+            <h4 class="font-bold text-base text-slate-800">소음 및 환경</h4>
+          </div>
+
+          <div class="space-y-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+
+            <!-- 소음 민감도 -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1.5">소음 민감도</label>
+              <div class="grid grid-cols-3 gap-2">
+                <label class="radio-box flex items-center justify-center py-2 px-1 bg-white border border-slate-300 rounded-lg text-xs font-medium cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="noise_sensitivity" value="high" class="accent-red-600 mr-1"> 예민
+                </label>
+                <label class="radio-box flex items-center justify-center py-2 px-1 bg-white border border-slate-300 rounded-lg text-xs font-medium cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="noise_sensitivity" value="medium" class="accent-red-600 mr-1" checked> 보통
+                </label>
+                <label class="radio-box flex items-center justify-center py-2 px-1 bg-white border border-slate-300 rounded-lg text-xs font-medium cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="noise_sensitivity" value="low" class="accent-red-600 mr-1"> 둔감
+                </label>
+              </div>
+              <p class="text-[11px] text-slate-400 mt-1.5 px-0.5">잠귀가 밝거나 작은 소리에도 집중이 깨지면 '예민'을 선택해 주세요.</p>
+            </div>
+
+            <!-- 음악, 영상 시청 방식 -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1.5">음악·영상 시청 방식</label>
+              <div class="space-y-2">
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="media_style" value="earphone" class="accent-red-600" checked>
+                  <span><b>이어폰·헤드폰</b> (항상 개인 기기로만 들어요)</span>
+                </label>
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="media_style" value="speaker_low" class="accent-red-600">
+                  <span><b>작은 스피커</b> (낮에는 작게 틀 수 있어요)</span>
+                </label>
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="media_style" value="speaker_free" class="accent-red-600">
+                  <span><b>스피커 자유</b> (룸메이트가 괜찮다면 편하게 틀어요)</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 통화 -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1.5">통화</label>
+              <div class="space-y-2">
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="call_style" value="outside" class="accent-red-600">
+                  <span><b>밖에서 통화</b> (복도·라운지에서 받아요)</span>
+                </label>
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="call_style" value="short_quiet" class="accent-red-600" checked>
+                  <span><b>짧게·조용히</b> (방에서 하되 짧고 작게 해요)</span>
+                </label>
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="call_style" value="free" class="accent-red-600">
+                  <span><b>방에서 자유롭게</b> (통화·화상 통화가 잦아요)</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 조명 -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1.5">조명 (취침 시간대)</label>
+              <div class="space-y-2">
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="light_pref" value="dark" class="accent-red-600">
+                  <span><b>완전 소등</b> (불빛이 조금이라도 있으면 잠들기 어려워요)</span>
+                </label>
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="light_pref" value="dim_ok" class="accent-red-600" checked>
+                  <span><b>은은한 조명 OK</b> (스탠드나 책상등 정도는 괜찮아요)</span>
+                </label>
+                <label class="radio-box flex items-center gap-2.5 p-2.5 bg-white border border-slate-300 rounded-lg text-xs cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="light_pref" value="bright_ok" class="accent-red-600">
+                  <span><b>밝아도 상관없음</b> (불이 켜져 있어도 잘 자요)</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- 온도 민감도 -->
+            <div>
+              <label class="block text-xs font-semibold text-slate-600 mb-1.5">온도 민감도</label>
+              <div class="grid grid-cols-3 gap-2">
+                <label class="radio-box flex items-center justify-center py-2 px-1 bg-white border border-slate-300 rounded-lg text-xs font-medium cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="temp_sensitivity" value="hot" class="accent-red-600 mr-1"> 더위 많이 탐
+                </label>
+                <label class="radio-box flex items-center justify-center py-2 px-1 bg-white border border-slate-300 rounded-lg text-xs font-medium cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="temp_sensitivity" value="normal" class="accent-red-600 mr-1" checked> 보통
+                </label>
+                <label class="radio-box flex items-center justify-center py-2 px-1 bg-white border border-slate-300 rounded-lg text-xs font-medium cursor-pointer transition hover:border-red-400">
+                  <input type="radio" name="temp_sensitivity" value="cold" class="accent-red-600 mr-1"> 추위 많이 탐
+                </label>
+              </div>
+              <p class="text-[11px] text-slate-400 mt-1.5 px-0.5">냉난방 세기와 환기, 이불 두께 같은 취향을 맞출 때 참고돼요.</p>
+            </div>
+
+          </div>
+        </div>
+
       </div>
 
       <!-- [하단 고정] 저장 및 게시 버튼 -->

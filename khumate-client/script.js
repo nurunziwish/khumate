@@ -107,6 +107,12 @@ function closeConfirmModal() {
   if (modal) modal.classList.add('hidden');
 }
 
+// 선택된 라디오 값 읽기 (선택이 없으면 기본값 반환)
+function getRadioValue(name, fallback) {
+  const checked = document.querySelector(`input[name="${name}"]:checked`);
+  return checked ? checked.value : fallback;
+}
+
 // 게시하기 최종 실행 (기존 게시글 덮어쓰기 처리)
 function executePublish() {
   const postTitle = document.getElementById('post-title').value.trim() || "룸메이트 구해요";
@@ -128,7 +134,14 @@ function executePublish() {
     dept: deptInput,
     studentId: rawStudentId.includes("학번") ? rawStudentId : `${rawStudentId}학번`,
     birthYear: rawBirthYear.includes("년생") ? rawBirthYear : `${rawBirthYear}년생`,
-    title: postTitle
+    title: postTitle,
+
+    // 3. 소음 및 환경 (서버 연결을 대비해 키는 snake_case로 저장)
+    noise_sensitivity: getRadioValue('noise_sensitivity', 'medium'),
+    media_style: getRadioValue('media_style', 'earphone'),
+    call_style: getRadioValue('call_style', 'short_quiet'),
+    light_pref: getRadioValue('light_pref', 'dim_ok'),
+    temp_sensitivity: getRadioValue('temp_sensitivity', 'normal')
   };
 
   // 요구사항: 기존 게시글을 삭제하고 내 새 글로 대체
