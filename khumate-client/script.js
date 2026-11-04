@@ -215,7 +215,8 @@ function cardHtml(post, match = null, plain = false) {
   const stateHtml = blank
     ? `<span class="ml-auto px-2.5 py-1 rounded-lg bg-slate-400 text-white text-xs font-bold">📝 작성 전</span>`
     : `<button onclick="event.stopPropagation(); archiveMyPost()" class="ml-auto px-2.5 py-1 rounded-lg ${isPublic ? 'bg-red-600 hover:bg-red-700' : 'bg-slate-500 hover:bg-slate-600'} text-white text-xs font-bold shadow-sm transition">${isPublic ? '🌐 공개 중' : '🔒 비공개 중'}</button>`;
-  const open = blank ? 'openMyCardModal()' : `openViewModal('${esc(post.user_id)}')`;
+  // 로그인 안 한 사용자는 카드 내용을 볼 수 없으니 로그인 창을 띄움
+  const open = blank ? 'openMyCardModal()' : !currentUser ? "openAuthModal('login')" : `openViewModal('${esc(post.user_id)}')`;
   // 값이 비어 있으면 그 칸은 안 보여 줌
   const chip = (v, cls) => v ? `<span class="${cls}">${esc(v)}</span>` : '';
   return `
@@ -323,7 +324,7 @@ async function loadPosts() {
     let mine = null, state;
     if (!uid) {
       // 로그인 안 한 사용자: 글 목록만 (쪽지 등은 막혀 있음)
-      state = { mode: 'guest', browse: await fetchBrowsePosts() };
+      state = { mode: 'guest', browse: await fetchBrowsePosts(GUEST_LIST_COLUMNS) };
     } else {
       mine = await fetchMyPost(uid);
       if (mine && mine.status !== 'published') {
