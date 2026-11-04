@@ -111,8 +111,8 @@ const PROFILE_SCHEMA = [
       {
         type: 'group', label: '샤워', grid: 'grid-cols-[1.5fr_1fr]',
         fields: [
-          { name: 'shower_time', sublabel: '시간대 (중복 선택)', type: 'checkbox', cols: 3, default: [], optional: true,
-            options: [o('morning', '아침'), o('evening', '저녁'), o('irregular', '불규칙')] },
+          { name: 'shower_time', sublabel: '시간대 (중복 선택)', type: 'checkbox', cols: 3, default: [],
+            options: [o('morning', '아침'), o('evening', '저녁')] },
           { name: 'shower_duration', sublabel: '소요 시간', type: 'select', placeholder: '선택',
             options: [o('5', '5분 이내'), o('10', '10분'), o('15', '15분'), o('20', '20분'), o('30', '30분'), o('40', '40분 이상')] },
         ],
@@ -197,7 +197,7 @@ const PROFILE_SCHEMA = [
           { name: 'trash_style', sublabel: '처리 방식', type: 'radio', list: true,
             options: [o('full', '다 찼을 때 비움', '쓰레기가 다 찼을 때만 비워요'), o('regular', '모아서 주기적으로', '일정 주기로 모아서 비워요'), o('immediate', '바로바로 비움', '날마다 바로 비워요')] },
           under('trash_style', 'regular', { name: 'trash_freq', sublabel: '비우는 주기', type: 'range', ticks: FREQ_TICKS }),
-          { name: 'shared_bin', sublabel: '쓰레기통 공유', type: 'checkbox', cols: 2, default: [], optional: true,
+          { name: 'shared_bin', sublabel: '쓰레기통 공유', type: 'checkbox', cols: 2, default: [],
             options: [o('yes', 'O', '공유함'), o('no', 'X', '공유 안 함')] },
           { name: 'trash_rotation', sublabel: '쓰레기 당번제', type: 'checkbox', cols: 2, default: [], when: { name: 'shared_bin', value: 'yes' },
             options: [o('ordered', 'O', '순서대로'), o('free', 'X', '각자 알아서')] },

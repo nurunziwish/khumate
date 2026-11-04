@@ -365,8 +365,11 @@ const canMatch = (me, other) =>
 //  - 둘 다 조건이 없으면 두 사람의 성향끼리 비슷한지(sim)
 const NEUTRAL = 0.8;
 const isVal = v => v !== null && v !== undefined && !Number.isNaN(v);
+// 룸메 답에 '상관없음'(any)이 있으면 그 항목은 모든 경우를 허용하는 것으로 1점
+const anyPick = (ans, d) => (d.uses || []).some(k => /^rm_/.test(k) && [].concat(ans[k] ?? []).some(v => v === 'any' || v === '상관없음'));
 const dimValue = (d, a, b) => {
-  const pa = d.pref ? d.pref(a, b) : null, pb = d.pref ? d.pref(b, a) : null;
+  const pa = anyPick(a, d) ? 1 : d.pref ? d.pref(a, b) : null;
+  const pb = anyPick(b, d) ? 1 : d.pref ? d.pref(b, a) : null;
   const sym = d.sim ? d.sim(a, b) : null;
   const neu = d.neutral ?? NEUTRAL;
   const x = isVal(pa) ? pa : isVal(pb) ? neu : sym;
@@ -431,7 +434,7 @@ function matchBreakdown(a, b) {
     const v = dimValue(d, a, b);
     if (!isVal(v)) return null;
     const key = d.uses[0];
-    const pa = d.pref ? d.pref(a, b) : null, pb = d.pref ? d.pref(b, a) : null;
+    const pa = anyPick(a, d) ? 1 : d.pref ? d.pref(a, b) : null, pb = anyPick(b, d) ? 1 : d.pref ? d.pref(b, a) : null;
     return { label: d.label, key, mine: a[key], theirs: b[key], mineRange: rangeOf(pa), theirsRange: rangeOf(pb), score: Math.round(v * 100) };
   }).filter(Boolean);
 }

@@ -483,10 +483,12 @@ async function openViewModal(userId) {
   aiBox.innerHTML = ai ? aiBoxHtml(ai) : '';
   aiBox.classList.toggle('hidden', !ai);
   // 내 카드가 있고 남의 카드면 항목별 비교를 같이 보여 줌
+  // 점수 설명: 각 질문 칸 바로 아래에 붙이고, 칸을 찾지 못한 항목만 아래 비교표에 남김
   const cmpBox = document.getElementById('view-compare');
   const canCompare = !!currentUser && !!myPost && row.user_id !== currentUser.id;
-  cmpBox.innerHTML = canCompare ? compareHtml(myPost.answers || {}, row.answers || {}) : '';
-  cmpBox.classList.toggle('hidden', !canCompare);
+  const leftover = canCompare ? inlineCompare(matchBreakdown(myPost.answers || {}, row.answers || {})) : [];
+  cmpBox.innerHTML = leftover.length ? compareRowsHtml(leftover, matchScore(myPost.answers || {}, row.answers || {})) : '';
+  cmpBox.classList.toggle('hidden', !leftover.length);
 
   // 쪽지 버튼: 로그인 안 했거나 내 글이면 비활성화 (쪽지 기능 자체는 아직 준비 중)
   const msgBtn = document.getElementById('view-msg-btn');
@@ -693,10 +695,30 @@ function valueText(key, v) {
   return lab(v);
 }
 // 정밀 분석 창: 내 카드와 항목별로 비교 (내 허용 범위 안인지, 상대 허용 범위 안인지, 점수)
+// 질문 칸 바로 아래 점수 설명 (남의 카드 보기에서만). 찾은 항목은 칸에 붙이고, 못 찾은 항목은 반환해서 아래 비교표로
+function inlineCompare(rows) {
+  const scope = document.getElementById('view-sections');
+  const tone = t => t.startsWith('범위 안') ? 'border-emerald-200 bg-emerald-50/70 text-emerald-700'
+    : t.startsWith('범위 밖') ? 'border-amber-200 bg-amber-50/70 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-500';
+  const left = [];
+  for (const r of rows) {
+    const el = scope.querySelector(`[data-fields~="${r.key}"]`);
+    if (!el) { left.push(r); continue; }
+    el.insertAdjacentHTML('afterend', `
+      <div class="mt-1.5 rounded-lg border px-3 py-2 text-xs leading-relaxed ${tone(r.mineRange)}">
+        <p class="font-bold">🔍 점수 ${r.score}점 <span class="font-normal">· 내 허용 범위: ${esc(r.mineRange)}</span></p>
+        <p class="font-normal opacity-80">상대 허용 범위: ${esc(r.theirsRange)}</p>
+      </div>`);
+  }
+  return left;
+}
+
 function compareHtml(mine, theirs) {
   const rows = matchBreakdown(mine, theirs);
   if (!rows.length) return '<p class="text-xs text-slate-400">비교할 항목이 부족해요.</p>';
-  const ms = matchScore(mine, theirs);
+  return compareRowsHtml(rows, matchScore(mine, theirs));
+}
+function compareRowsHtml(rows, ms) {
   const tone = t => t.startsWith('범위 안') ? 'text-emerald-600 font-bold' : t.startsWith('범위 밖') ? 'text-amber-600 font-bold' : 'text-slate-400';
   return `
     <div class="rounded-xl border border-slate-200 bg-white p-4 text-xs leading-relaxed space-y-2">
