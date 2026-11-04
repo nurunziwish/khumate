@@ -53,7 +53,7 @@ function choiceHtml(f, type) {
 }
 
 // 눈금 글자 줄 (ticks 슬라이더): 눈금 위치마다 점 + 이름
-const tickLabelsHtml = ticks => `<div class="khu-tick-row khu-tick-steps">${ticks.map((t, i) =>
+const tickLabelsHtml = ticks => `<div class="khu-tick-row khu-tick-steps" style="margin-top:14px">${ticks.map((t, i) =>
   `<div class="khu-tick" style="left:calc(8px + (100% - 16px) * ${i / (ticks.length - 1)})"><i></i><span>${esc(t)}</span></div>`).join('')}</div>`;
 
 // 드롭다운 (단과대 서식 공통)  searchable: 검색·직접입력 허용 / 아니면 선택 전용

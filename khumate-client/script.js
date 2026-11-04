@@ -707,9 +707,56 @@ function valueText(key, v) {
 //  - 룸메 탭 범위 슬라이더: 내 정보 값을 점으로 표시, 범위 안이면 초록 테두리 / 밖이면 빨강
 //  - 정보 탭 슬라이더: 선 색은 숨기고, 내 룸메 허용 범위를 초록 띠로 표시
 let viewCompareCtx = null;   // 지금 보기 모달의 내 답·상대 답 (탭을 바꾸면 다시 그림)
+
+// 행거·냉장고: 원하는 룸메 조건과 상대 답을 케이스별로 판정
+//  - 있음을 원하는데 상대가 없음 → X
+//  - 없음을 원하는데 상대가 있음 → X
+//  - 공유 의사를 원하는데 상대가 공유 불가 → X
+//  - 공구 의사를 원하는데 상대가 공구 의사 없음 → X
+const SHARE_ITEMS = { hanger: '행거', fridge: '냉장고' };
+function shareCases(it, a, b) {
+  const label = SHARE_ITEMS[it];
+  // 원하는 룸메 답은 중복 선택(배열)일 수 있음: 있음·없음을 둘 다 고르면 그 조건은 상관없음
+  const pick = k => [].concat(a[k] ?? []);
+  const wants = pick('rm_' + it), wantsLend = pick('rm_' + it + '_lend'), wantsBuy = pick('rm_' + it + '_buy');
+  const wantOwn = wants.includes('own') && !wants.includes('none');
+  const wantNone = wants.includes('none') && !wants.includes('own');
+  const wantLend = wantsLend.includes('yes') && !wantsLend.includes('no');
+  const wantBuy = wantsBuy.includes('yes') && !wantsBuy.includes('no');
+  const have = b[it];
+  const issues = [];
+  if (wantOwn && have !== 'own') issues.push(`상대 ${label} 없음 (원하는 룸메는 ${label} 있음)`);
+  if (wantNone && have === 'own') issues.push(`상대 ${label} 있음 (원하는 룸메는 ${label} 없음)`);
+  if (wantLend && have === 'own' && b[it + '_lend'] !== 'yes') issues.push(`상대 공유 의사 없음 (원하는 룸메는 공유 의사 있음)`);
+  if (wantBuy && have !== 'own' && b[it + '_buy'] !== 'yes') issues.push(`상대 공구 의사 없음 (원하는 룸메는 공구 의사 있음)`);
+  if (!issues.length) return { ok: true, text: `✅ ${label} 조건 맞음` };
+  return { ok: false, text: `❌ ${issues.join(' · ')}` };
+}
 function relayoutViewCompare() {
   if (!viewCompareCtx) return;
   inlineCompare(viewCompareCtx.a, viewCompareCtx.b);
+}
+
+// 보기 모달 정리: 취미 입력칸·소개글 안내 문구 제거, 내 취미와 겹치는 태그는 초록
+function tidyViewSections(a) {
+  const scope = document.getElementById('view-sections');
+  if (!scope) return;
+  scope.querySelectorAll('input, textarea').forEach(el => { el.placeholder = ''; });
+  const hobbyEl = scope.querySelector('[data-fields~="hobby"]');
+  if (hobbyEl) {
+    hobbyEl.querySelectorAll('.khu-tags-wrap, .khu-tags-msg').forEach(n => { n.style.display = 'none'; });
+    const mine = [].concat(a.hobby || []).map(String);
+    hobbyEl.querySelectorAll('*').forEach(x => {
+      if (x.children.length || !mine.includes(x.textContent.trim())) return;
+      const chip = x.closest('span, div') || x;
+      chip.style.background = '#ecfdf5'; chip.style.color = '#047857'; chip.style.borderColor = '#6ee7b7';
+    });
+  }
+  const introEl = scope.querySelector('[data-fields~="intro"]');
+  if (introEl) {
+    const ta = introEl.querySelector('textarea');
+    if (!ta || !ta.value.trim()) introEl.style.display = 'none';   // 소개글이 없으면 칸 자체를 숨김
+  }
 }
 
 // 남의 카드 보기: 질문 칸마다 한 줄 표시 + 탭 맨 위 요약 (설명 박스·색 없음)
@@ -719,6 +766,7 @@ function inlineCompare(a, b) {
   const scope = document.getElementById('view-sections');
   if (!scope) return;
   scope.querySelectorAll('.khu-cmp').forEach(el => el.remove());   // 이전 표시 지우고 다시 그림
+  tidyViewSections(a);
   const fieldEl = (name, panel) => scope.querySelector(`[data-panel="${panel}"] [data-fields~="${name}"]`);
   const pill = (ok, text) => `<span class="khu-cmp inline-flex items-center max-w-full px-2.5 py-1 rounded-full text-[11px] leading-snug font-bold border ${ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'}">${text}</span>`;
   const resultText = (p, any) => any ? '✅ 상관없음 (모두 허용)'
@@ -734,7 +782,24 @@ function inlineCompare(a, b) {
   const tally = { me: { ok: 0, total: 0 }, roommate: { ok: 0, total: 0 } };
 
   for (const d of DIMENSIONS) {
-    if (!d.pref) continue;
+    if (!d.pref) {
+      // 허용 범위가 없는 항목: 답끼리 얼마나 맞는지 (행거·냉장고 공유 의사 등). 취미·이미 알약 붙은 칸은 건너뜀
+      const meKeyS = d.uses.find(k => !/^rm_/.test(k));
+      if (!meKeyS || meKeyS === 'hobby' || !d.sim) continue;
+      const el = fieldEl(meKeyS, 'me');
+      if (!el || el.querySelector('.khu-cmp')) continue;
+      if (SHARE_ITEMS[meKeyS]) {
+        if (![].concat(a['rm_' + meKeyS] ?? []).length) continue;   // 원하는 룸메 답이 없으면 표시 안 함
+        const r = shareCases(meKeyS, a, b);
+        addPill(el, pill(r.ok, r.text));
+        continue;
+      }
+      const sv = d.sim(a, b);
+      if (!isVal(sv)) continue;
+      const ok = sv >= 0.5;
+      addPill(el, pill(ok, `내 답: ${esc(valueText(meKeyS, a[meKeyS]))} · 상대 답: ${esc(valueText(meKeyS, b[meKeyS]))} ${ok ? '✅' : '❌'}`));
+      continue;
+    }
     const meKey = d.uses.find(k => !/^rm_/.test(k));
     const rmKey = d.uses.find(k => /^rm_/.test(k));
     if (!meKey || !rmKey) continue;
