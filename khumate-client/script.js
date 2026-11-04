@@ -486,9 +486,9 @@ async function openViewModal(userId) {
   // 점수 설명: 각 질문 칸 바로 아래에 붙이고, 칸을 찾지 못한 항목만 아래 비교표에 남김
   const cmpBox = document.getElementById('view-compare');
   const canCompare = !!currentUser && !!myPost && row.user_id !== currentUser.id;
-  const leftover = canCompare ? inlineCompare(matchBreakdown(myPost.answers || {}, row.answers || {})) : [];
-  cmpBox.innerHTML = leftover.length ? compareRowsHtml(leftover, matchScore(myPost.answers || {}, row.answers || {})) : '';
-  cmpBox.classList.toggle('hidden', !leftover.length);
+  if (canCompare) inlineCompare(myPost.answers || {}, row.answers || {});
+  cmpBox.innerHTML = '';
+  cmpBox.classList.add('hidden');
 
   // 쪽지 버튼: 로그인 안 했거나 내 글이면 비활성화 (쪽지 기능 자체는 아직 준비 중)
   const msgBtn = document.getElementById('view-msg-btn');
@@ -695,33 +695,48 @@ function valueText(key, v) {
   return lab(v);
 }
 // 정밀 분석 창: 내 카드와 항목별로 비교 (내 허용 범위 안인지, 상대 허용 범위 안인지, 점수)
-// 질문 칸 바로 아래 점수 설명 (남의 카드 보기에서만). 탭마다 한 방향만 따짐:
-//  - 정보 탭 칸: 상대 정보 ↔ 내 룸메 허용 범위
-//  - 원하는 룸메 탭 칸: 상대 룸메 허용 범위 ↔ 내 정보
-// 찾지 못한 항목은 반환해서 아래 비교표로
-function inlineCompare(rows) {
+// 질문 칸 아래 점수 설명 (남의 카드 보기에서만). 방향은 탭마다 하나씩:
+//  - 정보 칸 아래: 상대 정보 ↔ 내 룸메 허용 범위
+//  - 원하는 룸메 칸 아래: 상대 룸메 허용 범위 ↔ 내 정보
+// 룸메 조건이 없는 항목(조명 등 점수 기준이 없는 것)은 설명을 붙이지 않음
+const RANGE_LABEL = (p, any) => any ? '✅ 상관없음 (모두 허용)'
+  : !isVal(p) ? '➖ 조건 없음'
+  : p >= 0.999 ? '✅ 허용 범위 안'
+  : `❌ 허용 범위 밖 (일치율 ${Math.round(p * 100)}%)`;
+function inlineCompare(a, b) {
   const scope = document.getElementById('view-sections');
-  const cls = { ok: 'border-emerald-300 bg-emerald-50 text-emerald-800', no: 'border-amber-300 bg-amber-50 text-amber-800' };
-  const okOf = t => t.startsWith('범위 밖') ? 'no' : 'ok';
-  const box = (title, range, answerLabel, answer, score) => `
-    <div class="w-full box-border mt-2 rounded-xl border-2 px-4 py-3 text-sm leading-relaxed break-words whitespace-normal ${cls[okOf(range)]}">
-      <p class="font-black">🔍 ${title} <span class="font-normal opacity-80">· 항목 점수 ${score}점</span></p>
-      <p class="mt-1 font-bold">${esc(range)}</p>
-      <p class="pl-3 text-xs opacity-80">${answerLabel}: ${esc(answer)}</p>
+  if (!scope) return;
+  // 정보 칸은 '내 정보' 탭 안에서만, 룸메 칸은 '원하는 룸메' 탭 안에서만 찾음 (탭 하나에 한 방향)
+  const elsOf = (names, panel) => names.map(n => scope.querySelector(`[data-panel="${panel}"] [data-fields~="${n}"]`)).filter(Boolean);
+  // 칸(또는 같은 줄 칸 묶음) 아래 전체 폭으로 붙임
+  const attach = (els, html) => {
+    if (!els.length) return;
+    let anc = els[0];
+    while (anc && !els.every(x => anc.contains(x))) anc = anc.parentElement;
+    if (anc) anc.insertAdjacentHTML('beforeend', html);
+  };
+  const box = (ok, title, lines) => `
+    <div class="col-span-full w-full box-border mt-3 rounded-xl border-2 px-4 py-3 text-sm leading-relaxed break-words whitespace-normal ${ok ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-amber-300 bg-amber-50 text-amber-900'}">
+      <p class="font-black">${title}</p>
+      ${lines.map(l => `<p class="mt-1.5">${l}</p>`).join('')}
     </div>`;
-  const left = [];
-  for (const r of rows) {
-    const d = DIMENSIONS.find(x => x.uses && x.uses[0] === r.key);
-    const rmKey = d ? d.uses.find(k => /^rm_/.test(k)) : null;
-    const infoEl = scope.querySelector(`[data-fields~="${r.key}"]`);
-    const rmEl = rmKey ? scope.querySelector(`[data-fields~="${rmKey}"]`) : null;
-    if (!infoEl && !rmEl) { left.push(r); continue; }
-    if (infoEl) infoEl.insertAdjacentHTML('afterend',
-      box('상대 정보 ↔ 내 룸메 허용 범위', `${r.mineRange}`, '상대 답', valueText(r.key, r.theirs), r.score));
-    if (rmEl) rmEl.insertAdjacentHTML('afterend',
-      box('상대 룸메 허용 범위 ↔ 내 정보', `${r.theirsRange}`, '내 답', valueText(r.key, r.mine), r.score));
+  for (const d of DIMENSIONS) {
+    if (!d.pref) continue;
+    const meKeys = d.uses.filter(k => !/^rm_/.test(k));
+    const rmKeys = d.uses.filter(k => /^rm_/.test(k));
+    const meEls = elsOf(meKeys, 'me'), rmEls = elsOf(rmKeys, 'roommate');
+    const anyA = anyPick(a, d), anyB = anyPick(b, d);
+    const pa = anyA ? 1 : d.pref(a, b);   // 내 룸메 허용 범위가 상대 정보에 맞는지
+    const pb = anyB ? 1 : d.pref(b, a);   // 상대 룸메 허용 범위가 내 정보에 맞는지
+    const v = dimValue(d, a, b);
+    const score = isVal(v) ? `${Math.round(v * 100)}점` : '-';
+    const theirInfo = meKeys.map(k => valueText(k, b[k])).join(' · ');
+    const mineInfo = meKeys.map(k => valueText(k, a[k])).join(' · ');
+    if (meEls.length) attach(meEls, box(!(isVal(pa) && pa < 0.999), `🔍 ${d.label}: 상대 정보 ↔ 내 룸메 허용 범위`,
+      [`상대 답: ${esc(theirInfo)}`, `내 룸메 허용 범위: ${RANGE_LABEL(pa, anyA)}`, `항목 점수: ${score}`]));
+    if (rmEls.length) attach(rmEls, box(!(isVal(pb) && pb < 0.999), `🔍 ${d.label}: 상대 룸메 허용 범위 ↔ 내 정보`,
+      [`내 답: ${esc(mineInfo)}`, `상대 룸메 허용 범위: ${RANGE_LABEL(pb, anyB)}`, `항목 점수: ${score}`]));
   }
-  return left;
 }
 
 function compareHtml(mine, theirs) {
