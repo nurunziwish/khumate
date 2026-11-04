@@ -739,13 +739,13 @@ function inlineCompare(a, b) {
     const infoEl = fieldEl(meKey, 'me');
     if (infoEl && isVal(pa)) {
       const ok = pa >= 0.999;
-      addPill(infoEl, pill(ok, `상대 답: ${esc(valueText(meKey, b[meKey]))} · 내 룸메 허용 범위: ${resultText(pa, anyA)}`));
+      addPill(infoEl, pill(ok, `내 룸메 허용 범위: ${esc(valueText(rmKey, a[rmKey]))} ${ok ? '✅' : '❌'}`));
       tally.me.total++; if (ok) tally.me.ok++;
     }
     const rmEl = fieldEl(rmKey, 'roommate');
     if (rmEl && isVal(pb)) {
       const ok = pb >= 0.999;
-      addPill(rmEl, pill(ok, `내 답: ${esc(valueText(meKey, a[meKey]))} · 상대 룸메 허용 범위: ${resultText(pb, anyB)}`));
+      addPill(rmEl, pill(ok, `내 정보: ${esc(valueText(meKey, a[meKey]))} ${ok ? '✅' : '❌'}`));
       tally.roommate.total++; if (ok) tally.roommate.ok++;
     }
   }
