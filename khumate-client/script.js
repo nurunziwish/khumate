@@ -705,68 +705,64 @@ function relayoutViewCompare() {
   if (!viewCompareCtx) return;
   inlineCompare(viewCompareCtx.a, viewCompareCtx.b);
 }
+
+// 남의 카드 보기: 질문 칸마다 한 줄 표시 + 탭 맨 위 요약 (설명 박스·색 없음)
+//  - 내 정보 탭: 상대 정보가 내 룸메 허용 범위 안인지
+//  - 원하는 룸메 탭: 내 정보가 상대 룸메 허용 범위 안인지
 function inlineCompare(a, b) {
   const scope = document.getElementById('view-sections');
   if (!scope) return;
   scope.querySelectorAll('.khu-cmp').forEach(el => el.remove());   // 이전 표시 지우고 다시 그림
   const fieldEl = (name, panel) => scope.querySelector(`[data-panel="${panel}"] [data-fields~="${name}"]`);
-  const GREEN = { bg: '#ecfdf5', border: '#6ee7b7' };
-  // 0 = 빨강(멀리), 1 에 가까울수록 노랑 (hue 0 → 45)
-  const warm = p => { const h = Math.round(45 * Math.max(0, Math.min(1, p))); return { bg: `hsl(${h} 90% 95%)`, border: `hsl(${h} 85% 60%)` }; };
-  const paint = (el, c) => { el.style.backgroundColor = c.bg; el.style.borderColor = c.border; };
+  const pill = (ok, text) => `<span class="khu-cmp inline-flex items-center max-w-full px-2.5 py-1 rounded-full text-[11px] leading-snug font-bold border ${ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'}">${text}</span>`;
+  const resultText = (p, any) => any ? '✅ 상관없음 (모두 허용)'
+    : !isVal(p) ? '➖ 조건 없음'
+    : p >= 0.999 ? '✅ 허용 범위 안'
+    : `❌ 허용 범위 밖 (일치율 ${Math.round(p * 100)}%)`;
+  const addPill = (el, html) => {
+    const wrap = `<div class="khu-cmp mt-1.5">${html}</div>`;
+    const lab = el.querySelector(':scope > label');
+    if (lab) lab.insertAdjacentHTML('afterend', wrap);
+    else el.insertAdjacentHTML('afterbegin', wrap);
+  };
+  const tally = { me: { ok: 0, total: 0 }, roommate: { ok: 0, total: 0 } };
 
   for (const d of DIMENSIONS) {
     if (!d.pref) continue;
     const meKey = d.uses.find(k => !/^rm_/.test(k));
     const rmKey = d.uses.find(k => /^rm_/.test(k));
     if (!meKey || !rmKey) continue;
-    const anyB = anyPick(b, d);
+    const anyA = anyPick(a, d), anyB = anyPick(b, d);
+    const pa = anyA ? 1 : d.pref(a, b);   // 내 룸메 허용 범위 ↔ 상대 정보
+    const pb = anyB ? 1 : d.pref(b, a);   // 상대 룸메 허용 범위 ↔ 내 정보
 
-    // 1) 룸메 탭: 선택지 칸 (범위 선택지 = 라디오·체크박스)
-    const rmEl = fieldEl(rmKey, 'roommate');
-    const inputs = rmEl ? Array.from(rmEl.querySelectorAll(`input[name="${rmKey}"]`)) : [];
-    if (inputs.length) {
-      for (const input of inputs) {
-        const v = input.value;
-        const box = input.closest('.radio-box') || input.closest('label') || input.parentElement;
-        const p = v === 'any' ? 1 : d.pref({ ...b, [rmKey]: v }, a);   // 이 선택지를 골랐을 때 내 정보가 맞는지
-        if (!isVal(p)) continue;
-        paint(box, p >= 0.999 ? GREEN : warm(p));
-      }
-    }
-
-    // 2) 룸메 탭: 범위 슬라이더 — 내 정보 값을 점으로, 범위 안이면 초록 테두리 / 밖이면 빨강
-    if (rmEl && !inputs.length && isVal(a[meKey])) {
-      const cont = rmEl.querySelector('.khu-dual, .khu-span');
-      const inp = cont?.querySelector('input[type=range]');
-      const v = Number(a[meKey]);
-      if (cont && inp && Number.isFinite(v)) {
-        const min = Number(inp.min) || 1, max = Number(inp.max) || 5;
-        const pos = Math.max(0, Math.min(1, (v - min) / (max - min)));
-        const ok = anyB || d.pref(b, a) >= 0.999;
-        cont.style.position = 'relative';
-        const topPx = inp.offsetTop + inp.offsetHeight / 2;
-        cont.insertAdjacentHTML('beforeend', `<div class="khu-cmp" style="position:absolute;top:${topPx}px;left:calc(8px + (100% - 16px) * ${pos});transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid ${ok ? '#10b981' : '#ef4444'};box-shadow:0 2px 6px rgb(15 23 42 / .2);pointer-events:none;z-index:2"></div>`);
-      }
-    }
-
-    // 3) 정보 탭 슬라이더: 상대 선 색은 숨기고, 내 룸메 허용 범위를 초록 띠로
     const infoEl = fieldEl(meKey, 'me');
-    const range = a[rmKey];
-    if (infoEl && range && typeof range === 'object' && isVal(range.lo) && isVal(range.hi)) {
-      const wrap = infoEl.querySelector('.khu-slider');
-      const inp = wrap?.querySelector('input[type=range]');
-      if (wrap && inp) {
-        const min = Number(inp.min) || 1, max = Number(inp.max) || 5;
-        const L = Math.max(0, Math.min(1, (range.lo - min) / (max - min)));
-        const R = Math.max(0, Math.min(1, (range.hi - min) / (max - min)));
-        inp.style.background = 'transparent';
-        wrap.style.position = 'relative';
-        const bandTop = inp.offsetTop + (inp.offsetHeight - 6) / 2;
-        wrap.insertAdjacentHTML('afterbegin', `<div class="khu-cmp" style="position:absolute;top:${bandTop}px;height:6px;border-radius:999px;left:calc(8px + (100% - 16px) * ${L});width:calc((100% - 16px) * ${Math.max(0, R - L)});background:linear-gradient(to right,#6ee7b7,#10b981);pointer-events:none"></div>`);
-      }
+    if (infoEl && isVal(pa)) {
+      const ok = pa >= 0.999;
+      addPill(infoEl, pill(ok, `상대 답: ${esc(valueText(meKey, b[meKey]))} · 내 룸메 허용 범위: ${resultText(pa, anyA)}`));
+      tally.me.total++; if (ok) tally.me.ok++;
+    }
+    const rmEl = fieldEl(rmKey, 'roommate');
+    if (rmEl && isVal(pb)) {
+      const ok = pb >= 0.999;
+      addPill(rmEl, pill(ok, `내 답: ${esc(valueText(meKey, a[meKey]))} · 상대 룸메 허용 범위: ${resultText(pb, anyB)}`));
+      tally.roommate.total++; if (ok) tally.roommate.ok++;
     }
   }
+
+  // 탭 맨 위 요약 + 범례
+  const score = matchScore(a, b);
+  const summary = (panel, label, t) => {
+    const el = scope.querySelector(`[data-panel="${panel}"]`);
+    if (!el) return;
+    el.insertAdjacentHTML('afterbegin', `
+      <div class="khu-cmp rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 text-xs text-slate-700 leading-relaxed">
+        <p class="font-bold">${label} 기준 맞는 항목 <span class="text-red-600">${t.ok}/${t.total}</span>${score ? ` · 규칙 점수 ${score.score}점` : ''}</p>
+        <p class="text-slate-500 mt-0.5">✅ 허용 범위 안 · ❌ 허용 범위 밖 (괄호는 일치율)</p>
+      </div>`);
+  };
+  summary('me', '내 룸메 허용', tally.me);
+  summary('roommate', '상대 룸메 허용', tally.roommate);
 }
 
 function compareHtml(mine, theirs) {
