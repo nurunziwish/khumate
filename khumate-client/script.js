@@ -696,46 +696,50 @@ function valueText(key, v) {
 }
 // 정밀 분석 창: 내 카드와 항목별로 비교 (내 허용 범위 안인지, 상대 허용 범위 안인지, 점수)
 // 질문 칸 아래 점수 설명 (남의 카드 보기에서만). 방향은 탭마다 하나씩:
-//  - 정보 칸 아래: 상대 정보 ↔ 내 룸메 허용 범위
-//  - 원하는 룸메 칸 아래: 상대 룸메 허용 범위 ↔ 내 정보
-// 룸메 조건이 없는 항목(조명 등 점수 기준이 없는 것)은 설명을 붙이지 않음
+//  - 내 정보 탭 칸 아래: 상대 정보 ↔ 내 룸메 허용 범위 (내 룸메 허용 답을 보여 줌)
+//  - 원하는 룸메 탭 칸 아래: 상대 룸메 허용 범위 ↔ 내 정보 (상대 룸메 허용 답을 보여 줌)
+// 점수 기준이 없는 항목은 박스를 만들지 않음
 const RANGE_LABEL = (p, any) => any ? '✅ 상관없음 (모두 허용)'
   : !isVal(p) ? '➖ 조건 없음'
   : p >= 0.999 ? '✅ 허용 범위 안'
   : `❌ 허용 범위 밖 (일치율 ${Math.round(p * 100)}%)`;
+// 한 칸 묶음(단과대·학과처럼 같은 줄의 칸)은 같이 묶어서 찾음
+const SIBLING_FIELDS = { dept: ['college'], rm_dept: ['rm_college'] };
 function inlineCompare(a, b) {
   const scope = document.getElementById('view-sections');
   if (!scope) return;
-  // 정보 칸은 '내 정보' 탭 안에서만, 룸메 칸은 '원하는 룸메' 탭 안에서만 찾음 (탭 하나에 한 방향)
-  const elsOf = (names, panel) => names.map(n => scope.querySelector(`[data-panel="${panel}"] [data-fields~="${n}"]`)).filter(Boolean);
-  // 칸(또는 같은 줄 칸 묶음) 아래 전체 폭으로 붙임
+  const elsOf = (names, panel) => names
+    .map(n => scope.querySelector(`[data-panel="${panel}"] [data-fields~="${n}"]`)).filter(Boolean);
+  // 칸 묶음 아래 전체 폭: 같은 줄 칸들의 공통 부모(grid)가 있으면 그 아래에 붙임
   const attach = (els, html) => {
     if (!els.length) return;
-    let anc = els[0];
-    while (anc && !els.every(x => anc.contains(x))) anc = anc.parentElement;
-    if (anc) anc.insertAdjacentHTML('beforeend', html);
+    let host = els[0];
+    while (host && !els.every(x => host.contains(x))) host = host.parentElement;
+    if (!host) return;
+    if (!/\bgrid\b/.test(host.className || '') && host.parentElement && /\bgrid\b/.test(host.parentElement.className || '')) host = host.parentElement;
+    host.insertAdjacentHTML('beforeend', html);
   };
   const box = (ok, title, lines) => `
     <div class="col-span-full w-full box-border mt-3 rounded-xl border-2 px-4 py-3 text-sm leading-relaxed break-words whitespace-normal ${ok ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-amber-300 bg-amber-50 text-amber-900'}">
       <p class="font-black">${title}</p>
       ${lines.map(l => `<p class="mt-1.5">${l}</p>`).join('')}
     </div>`;
+  const answerText = (keys, ans) => keys.map(k => valueText(k, ans[k])).join(' · ');
   for (const d of DIMENSIONS) {
     if (!d.pref) continue;
     const meKeys = d.uses.filter(k => !/^rm_/.test(k));
     const rmKeys = d.uses.filter(k => /^rm_/.test(k));
-    const meEls = elsOf(meKeys, 'me'), rmEls = elsOf(rmKeys, 'roommate');
+    const meEls = elsOf([...meKeys, ...(SIBLING_FIELDS[meKeys[0]] || [])], 'me');
+    const rmEls = elsOf([...rmKeys, ...(SIBLING_FIELDS[rmKeys[0]] || [])], 'roommate');
     const anyA = anyPick(a, d), anyB = anyPick(b, d);
     const pa = anyA ? 1 : d.pref(a, b);   // 내 룸메 허용 범위가 상대 정보에 맞는지
     const pb = anyB ? 1 : d.pref(b, a);   // 상대 룸메 허용 범위가 내 정보에 맞는지
     const v = dimValue(d, a, b);
     const score = isVal(v) ? `${Math.round(v * 100)}점` : '-';
-    const theirInfo = meKeys.map(k => valueText(k, b[k])).join(' · ');
-    const mineInfo = meKeys.map(k => valueText(k, a[k])).join(' · ');
-    if (meEls.length) attach(meEls, box(!(isVal(pa) && pa < 0.999), `🔍 ${d.label}: 상대 정보 ↔ 내 룸메 허용 범위`,
-      [`상대 답: ${esc(theirInfo)}`, `내 룸메 허용 범위: ${RANGE_LABEL(pa, anyA)}`, `항목 점수: ${score}`]));
-    if (rmEls.length) attach(rmEls, box(!(isVal(pb) && pb < 0.999), `🔍 ${d.label}: 상대 룸메 허용 범위 ↔ 내 정보`,
-      [`내 답: ${esc(mineInfo)}`, `상대 룸메 허용 범위: ${RANGE_LABEL(pb, anyB)}`, `항목 점수: ${score}`]));
+    if (meEls.length && rmKeys.length) attach(meEls, box(!(isVal(pa) && pa < 0.999), `🔍 ${d.label} · 상대 정보 ↔ 내 룸메 허용 범위`,
+      [`내 룸메 허용 답: ${esc(answerText(rmKeys, a))}`, `상대 정보: ${RANGE_LABEL(pa, anyA)}`, `항목 점수: ${score}`]));
+    if (rmEls.length && meKeys.length) attach(rmEls, box(!(isVal(pb) && pb < 0.999), `🔍 ${d.label} · 상대 룸메 허용 범위 ↔ 내 정보`,
+      [`내 정보 답: ${esc(answerText(meKeys, a))}`, `상대 룸메 허용 범위: ${RANGE_LABEL(pb, anyB)}`, `항목 점수: ${score}`]));
   }
 }
 
