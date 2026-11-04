@@ -205,7 +205,7 @@ function matchBadgeHtml(m) {
 // post: DB 행 / match: matchScore() 결과 (내 글이거나 둘러보기면 null)
 const MY_STATUS_LABEL = { published: '공개 중', draft: '비공개 중', archived: '비공개 중' };
 
-function cardHtml(post, match = null, plain = false) {
+function cardHtml(post, match = null, plain = false, inList = false) {
   const mine = !plain && currentUser && post.user_id === currentUser.id;   // plain: 읽기 전용 (확정 카드 복사본)
   const blank = !!post.blank;   // 아직 카드를 쓰지 않은 내 칸 (미리보기용, 저장된 글 아님)
   // 나와 같은 성별·거주 기간인 남의 카드는 살짝 붉게 구분 (목록에서만)
@@ -225,7 +225,7 @@ function cardHtml(post, match = null, plain = false) {
       <div class="flex items-center gap-1.5 text-xs font-bold">
         ${chip(post.gender, 'px-2.5 py-1 bg-red-100 text-red-600 rounded-md border border-red-200')}
         ${chip(post.dorm_period, 'px-2.5 py-1 bg-red-50 text-red-600 rounded-md border border-red-100')}
-        ${mine ? stateHtml : match ? matchBadgeHtml(match) : ''}
+        ${mine ? (inList ? '<span class="ml-auto px-2.5 py-1 rounded-lg bg-red-600 text-white text-xs font-bold">✦ 내 글</span>' : stateHtml) : match ? matchBadgeHtml(match) : ''}
       </div>
 
       <!-- 2단: 게시글 제목 (크게) -->
@@ -236,7 +236,7 @@ function cardHtml(post, match = null, plain = false) {
         ${post.dept ? `<span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700 font-semibold">${esc(post.dept)}</span>` : ''}
         ${post.student_id ? `<span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700">${esc(post.student_id)}학번</span>` : ''}
         ${post.birth_year ? `<span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700">${esc(post.birth_year)}년생</span>` : ''}
-        ${mine && !blank ? `<span class="ml-auto"><button onclick="event.stopPropagation(); removeMyPost()" class="text-slate-400 hover:text-red-600 underline">🗑️ 내 글 삭제</button></span>` : ''}
+        ${mine && !blank && !inList ? `<span class="ml-auto"><button onclick="event.stopPropagation(); removeMyPost()" class="text-slate-400 hover:text-red-600 underline">🗑️ 내 글 삭제</button></span>` : ''}
       </div>
     </div>`;
 }
@@ -290,7 +290,6 @@ function renderList() {
       // 최신순: 성별·거주 기간과 상관없이 전체 글. 같은 조건인 글에만 매칭률을 붙임
       const byId = new Map(listState.ranked.map(r => [r.post.user_id, r.match]));
       rows = listState.browse
-        .filter(p => p.user_id !== currentUser?.id)
         .map(p => ({ post: p, match: byId.get(p.user_id) ?? null }));
       text = `전체 매칭 카드 ${rows.length}개를 최근 수정순으로 보여드려요. 같은 성별·거주 기간 글에는 매칭률이 함께 떠요.`;
     } else {
@@ -299,7 +298,9 @@ function renderList() {
     }
     parts.push(bannerHtml(`${text} (카드를 누르면 답안을 볼 수 있어요)`));
     parts.push(...(rows.length
-      ? rows.map(r => cardHtml(r.post, r.match))
+      ? rows.map(r => r.post.user_id === currentUser?.id
+          ? `<div class="khu-grad-border">${cardHtml(r.post, null, false, true)}</div>`
+          : cardHtml(r.post, r.match))
       : ['<p class="text-center text-sm text-slate-400 py-10">아직 같은 조건의 글이 없어요. 조금만 기다려 주세요!</p>']));
   } else {
     const msg = listState.mode === 'confirmed' ? '룸메가 확정됐어요. 카드는 목록에서 내려갔고, 하우스룰 탭에서 서로의 카드를 볼 수 있어요.'
