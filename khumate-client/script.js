@@ -695,20 +695,31 @@ function valueText(key, v) {
   return lab(v);
 }
 // 정밀 분석 창: 내 카드와 항목별로 비교 (내 허용 범위 안인지, 상대 허용 범위 안인지, 점수)
-// 질문 칸 바로 아래 점수 설명 (남의 카드 보기에서만). 찾은 항목은 칸에 붙이고, 못 찾은 항목은 반환해서 아래 비교표로
+// 질문 칸 바로 아래 점수 설명 (남의 카드 보기에서만). 탭마다 한 방향만 따짐:
+//  - 정보 탭 칸: 상대 정보 ↔ 내 룸메 허용 범위
+//  - 원하는 룸메 탭 칸: 상대 룸메 허용 범위 ↔ 내 정보
+// 찾지 못한 항목은 반환해서 아래 비교표로
 function inlineCompare(rows) {
   const scope = document.getElementById('view-sections');
-  const tone = t => t.startsWith('범위 안') ? 'border-emerald-200 bg-emerald-50/70 text-emerald-700'
-    : t.startsWith('범위 밖') ? 'border-amber-200 bg-amber-50/70 text-amber-700' : 'border-slate-200 bg-slate-50 text-slate-500';
+  const cls = { ok: 'border-emerald-300 bg-emerald-50 text-emerald-800', no: 'border-amber-300 bg-amber-50 text-amber-800' };
+  const okOf = t => t.startsWith('범위 밖') ? 'no' : 'ok';
+  const box = (title, range, answerLabel, answer, score) => `
+    <div class="w-full box-border mt-2 rounded-xl border-2 px-4 py-3 text-sm leading-relaxed break-words whitespace-normal ${cls[okOf(range)]}">
+      <p class="font-black">🔍 ${title} <span class="font-normal opacity-80">· 항목 점수 ${score}점</span></p>
+      <p class="mt-1 font-bold">${esc(range)}</p>
+      <p class="pl-3 text-xs opacity-80">${answerLabel}: ${esc(answer)}</p>
+    </div>`;
   const left = [];
   for (const r of rows) {
-    const el = scope.querySelector(`[data-fields~="${r.key}"]`);
-    if (!el) { left.push(r); continue; }
-    el.insertAdjacentHTML('afterend', `
-      <div class="mt-1.5 rounded-lg border px-3 py-2 text-xs leading-relaxed ${tone(r.mineRange)}">
-        <p class="font-bold">🔍 점수 ${r.score}점 <span class="font-normal">· 내 허용 범위: ${esc(r.mineRange)}</span></p>
-        <p class="font-normal opacity-80">상대 허용 범위: ${esc(r.theirsRange)}</p>
-      </div>`);
+    const d = DIMENSIONS.find(x => x.uses && x.uses[0] === r.key);
+    const rmKey = d ? d.uses.find(k => /^rm_/.test(k)) : null;
+    const infoEl = scope.querySelector(`[data-fields~="${r.key}"]`);
+    const rmEl = rmKey ? scope.querySelector(`[data-fields~="${rmKey}"]`) : null;
+    if (!infoEl && !rmEl) { left.push(r); continue; }
+    if (infoEl) infoEl.insertAdjacentHTML('afterend',
+      box('상대 정보 ↔ 내 룸메 허용 범위', `${r.mineRange}`, '상대 답', valueText(r.key, r.theirs), r.score));
+    if (rmEl) rmEl.insertAdjacentHTML('afterend',
+      box('상대 룸메 허용 범위 ↔ 내 정보', `${r.theirsRange}`, '내 답', valueText(r.key, r.mine), r.score));
   }
   return left;
 }
