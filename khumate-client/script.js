@@ -695,51 +695,70 @@ function valueText(key, v) {
   return lab(v);
 }
 // 정밀 분석 창: 내 카드와 항목별로 비교 (내 허용 범위 안인지, 상대 허용 범위 안인지, 점수)
-// 질문 칸 아래 점수 설명 (남의 카드 보기에서만). 방향은 탭마다 하나씩:
-//  - 내 정보 탭 칸 아래: 상대 정보 ↔ 내 룸메 허용 범위 (내 룸메 허용 답을 보여 줌)
-//  - 원하는 룸메 탭 칸 아래: 상대 룸메 허용 범위 ↔ 내 정보 (상대 룸메 허용 답을 보여 줌)
-// 점수 기준이 없는 항목은 박스를 만들지 않음
-const RANGE_LABEL = (p, any) => any ? '✅ 상관없음 (모두 허용)'
-  : !isVal(p) ? '➖ 조건 없음'
-  : p >= 0.999 ? '✅ 허용 범위 안'
-  : `❌ 허용 범위 밖 (일치율 ${Math.round(p * 100)}%)`;
-// 한 칸 묶음(단과대·학과처럼 같은 줄의 칸)은 같이 묶어서 찾음
-const SIBLING_FIELDS = { dept: ['college'], rm_dept: ['rm_college'] };
+// 설명 박스 없이 질문 칸 자체에 표시 (남의 카드 보기에서만)
+//  - 룸메 탭 선택지: 내 정보가 허용되는 선택지는 초록, 멀수록 노랑→빨강
+//  - 룸메 탭 범위 슬라이더: 내 정보 값을 점으로 표시, 범위 안이면 초록 테두리 / 밖이면 빨강
+//  - 정보 탭 슬라이더: 선 색은 숨기고, 내 룸메 허용 범위를 초록 띠로 표시
 function inlineCompare(a, b) {
   const scope = document.getElementById('view-sections');
   if (!scope) return;
-  const elsOf = (names, panel) => names
-    .map(n => scope.querySelector(`[data-panel="${panel}"] [data-fields~="${n}"]`)).filter(Boolean);
-  // 칸 묶음 아래 전체 폭: 같은 줄 칸들의 공통 부모(grid)가 있으면 그 아래에 붙임
-  const attach = (els, html) => {
-    if (!els.length) return;
-    let host = els[0];
-    while (host && !els.every(x => host.contains(x))) host = host.parentElement;
-    if (!host) return;
-    if (!/\bgrid\b/.test(host.className || '') && host.parentElement && /\bgrid\b/.test(host.parentElement.className || '')) host = host.parentElement;
-    host.insertAdjacentHTML('beforeend', html);
-  };
-  const box = (ok, title, lines) => `
-    <div class="col-span-full w-full box-border mt-3 rounded-xl border-2 px-4 py-3 text-sm leading-relaxed break-words whitespace-normal ${ok ? 'border-emerald-300 bg-emerald-50 text-emerald-900' : 'border-amber-300 bg-amber-50 text-amber-900'}">
-      <p class="font-black">${title}</p>
-      ${lines.map(l => `<p class="mt-1.5">${l}</p>`).join('')}
-    </div>`;
-  const answerText = (keys, ans) => keys.map(k => valueText(k, ans[k])).join(' · ');
+  const fieldEl = (name, panel) => scope.querySelector(`[data-panel="${panel}"] [data-fields~="${name}"]`);
+  const optionValues = name => (allFields().find(f => f.name === name)?.options || []).map(o => o.value);
+  const GREEN = { bg: '#ecfdf5', border: '#6ee7b7' };
+  // 0 = 빨강(멀리), 1 에 가까울수록 노랑 (hue 0 → 45)
+  const warm = p => { const h = Math.round(45 * Math.max(0, Math.min(1, p))); return { bg: `hsl(${h} 90% 95%)`, border: `hsl(${h} 85% 60%)` }; };
+  const paint = (el, c) => { el.style.backgroundColor = c.bg; el.style.borderColor = c.border; };
+
   for (const d of DIMENSIONS) {
     if (!d.pref) continue;
-    const meKeys = d.uses.filter(k => !/^rm_/.test(k));
-    const rmKeys = d.uses.filter(k => /^rm_/.test(k));
-    const meEls = elsOf([...meKeys, ...(SIBLING_FIELDS[meKeys[0]] || [])], 'me');
-    const rmEls = elsOf([...rmKeys, ...(SIBLING_FIELDS[rmKeys[0]] || [])], 'roommate');
-    const anyA = anyPick(a, d), anyB = anyPick(b, d);
-    const pa = anyA ? 1 : d.pref(a, b);   // 내 룸메 허용 범위가 상대 정보에 맞는지
-    const pb = anyB ? 1 : d.pref(b, a);   // 상대 룸메 허용 범위가 내 정보에 맞는지
-    const v = dimValue(d, a, b);
-    const score = isVal(v) ? `${Math.round(v * 100)}점` : '-';
-    if (meEls.length && rmKeys.length) attach(meEls, box(!(isVal(pa) && pa < 0.999), `🔍 ${d.label} · 상대 정보 ↔ 내 룸메 허용 범위`,
-      [`내 룸메 허용 답: ${esc(answerText(rmKeys, a))}`, `상대 정보: ${RANGE_LABEL(pa, anyA)}`, `항목 점수: ${score}`]));
-    if (rmEls.length && meKeys.length) attach(rmEls, box(!(isVal(pb) && pb < 0.999), `🔍 ${d.label} · 상대 룸메 허용 범위 ↔ 내 정보`,
-      [`내 정보 답: ${esc(answerText(meKeys, a))}`, `상대 룸메 허용 범위: ${RANGE_LABEL(pb, anyB)}`, `항목 점수: ${score}`]));
+    const meKey = d.uses.find(k => !/^rm_/.test(k));
+    const rmKey = d.uses.find(k => /^rm_/.test(k));
+    if (!meKey || !rmKey) continue;
+    const anyB = anyPick(b, d);
+
+    // 1) 룸메 탭: 선택지 칸 (범위 선택지 = 라디오·체크박스)
+    const rmEl = fieldEl(rmKey, 'roommate');
+    const opts = optionValues(rmKey);
+    if (rmEl && opts.length) {
+      for (const v of opts) {
+        const input = rmEl.querySelector(`input[name="${rmKey}"][value="${v}"]`);
+        if (!input) continue;
+        const box = input.closest('label') || input.closest('.radio-box') || input.parentElement;
+        const p = v === 'any' ? 1 : d.pref({ ...b, [rmKey]: v }, a);   // 이 선택지를 골랐을 때 내 정보가 맞는지
+        if (!isVal(p)) continue;
+        paint(box, p >= 0.999 ? GREEN : warm(p));
+      }
+    }
+
+    // 2) 룸메 탭: 범위 슬라이더 — 내 정보 값을 점으로, 범위 안이면 초록 테두리 / 밖이면 빨강
+    if (rmEl && !opts.length && isVal(a[meKey])) {
+      const cont = rmEl.querySelector('.khu-dual, .khu-span');
+      const inp = cont?.querySelector('input[type=range]');
+      const v = Number(a[meKey]);
+      if (cont && inp && Number.isFinite(v)) {
+        const min = Number(inp.min) || 1, max = Number(inp.max) || 5;
+        const pos = Math.max(0, Math.min(1, (v - min) / (max - min)));
+        const ok = anyB || d.pref(b, a) >= 0.999;
+        cont.style.position = 'relative';
+        cont.insertAdjacentHTML('beforeend', `<div style="position:absolute;top:50%;left:calc(8px + (100% - 16px) * ${pos});transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid ${ok ? '#10b981' : '#ef4444'};box-shadow:0 2px 6px rgb(15 23 42 / .2);pointer-events:none;z-index:2"></div>`);
+      }
+    }
+
+    // 3) 정보 탭 슬라이더: 상대 선 색은 숨기고, 내 룸메 허용 범위를 초록 띠로
+    const infoEl = fieldEl(meKey, 'me');
+    const range = a[rmKey];
+    if (infoEl && range && typeof range === 'object' && isVal(range.lo) && isVal(range.hi)) {
+      const wrap = infoEl.querySelector('.khu-slider');
+      const inp = wrap?.querySelector('input[type=range]');
+      if (wrap && inp) {
+        const min = Number(inp.min) || 1, max = Number(inp.max) || 5;
+        const L = Math.max(0, Math.min(1, (range.lo - min) / (max - min)));
+        const R = Math.max(0, Math.min(1, (range.hi - min) / (max - min)));
+        inp.style.background = 'transparent';
+        wrap.style.position = 'relative';
+        wrap.insertAdjacentHTML('afterbegin', `<div style="position:absolute;top:6px;height:6px;border-radius:999px;left:calc(8px + (100% - 16px) * ${L});width:calc((100% - 16px) * ${Math.max(0, R - L)});background:linear-gradient(to right,#6ee7b7,#10b981);pointer-events:none"></div>`);
+      }
+    }
   }
 }
 
