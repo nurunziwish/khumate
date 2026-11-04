@@ -690,6 +690,12 @@ function applyAiResults(results, warning) {
 function valueText(key, v) {
   if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)) return '미응답';
   const f = allFields().find(x => x.name === key);
+  // 단계 이름이 있는 슬라이더는 숫자 대신 단계 이름 (룸메 칸은 같은 이름의 내 칸 설정을 씀)
+  const steps = f?.steps || allFields().find(x => x.name === key.replace(/^rm_/, ''))?.steps;
+  const minV = f?.min ?? allFields().find(x => x.name === key.replace(/^rm_/, ''))?.min ?? 1;
+  const sLab = x => steps && steps[Number(x) - minV] !== undefined ? (steps[Number(x) - minV] || `${x}단계`) : String(x);
+  if (steps && typeof v === 'object' && !Array.isArray(v)) return `${sLab(v.lo ?? v.from)} ~ ${sLab(v.hi ?? v.to)}`;
+  if (steps && !Array.isArray(v) && typeof v !== 'object') return sLab(v);
   const lab = x => f?.options?.find(op => String(op.value) === String(x))?.label ?? String(x);
   if (Array.isArray(v)) return v.map(lab).join(', ');
   if (typeof v === 'object') return v.from !== undefined ? `${v.from}~${v.to}` : `${v.lo}~${v.hi}`;

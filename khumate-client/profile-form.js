@@ -84,9 +84,9 @@ const FIELD_RENDERERS = {
     return `
       <div class="khu-slider ${answered ? '' : 'khu-unset'}">
         <input type="range" name="${f.name}" min="${f.min}" max="${f.max}" step="1" value="${val}" data-touched="${answered ? 1 : 0}" style="--pct:${pct}%">
-        ${f.ticks ? '' : `<div class="khu-ticks">${ticks}</div>`}
+        ${f.ticks || f.steps ? '' : `<div class="khu-ticks">${ticks}</div>`}
       </div>
-      ${f.ticks ? tickLabelsHtml(f.ticks) : `<div class="flex justify-between text-[11px] font-semibold text-slate-500 px-0.5 mt-1">
+      ${f.ticks ? tickLabelsHtml(f.ticks) : f.steps ? tickLabelsHtml(f.steps) : `<div class="flex justify-between text-[11px] font-semibold text-slate-500 px-0.5 mt-1">
         <span>${left}</span><span class="text-slate-400">${mid}</span><span>${right}</span>
       </div>`}
       ${answered ? '' : '<p class="khu-unset-hint text-[11px] text-slate-400 mt-1 px-0.5">슬라이더를 움직이거나 눌러서 선택해 주세요.</p>'}`;
@@ -168,7 +168,7 @@ const FIELD_RENDERERS = {
           <input type="range" data-end="lo" min="${f.min}" max="${f.max}" step="1" value="${lo}">
           <input type="range" data-end="hi" min="${f.min}" max="${f.max}" step="1" value="${hi}">
         </div>
-        ${f.ticks ? tickLabelsHtml(f.ticks) : `<div class="khu-ticks">${dots}</div>
+        ${f.ticks ? tickLabelsHtml(f.ticks) : f.steps ? tickLabelsHtml(f.steps) : `<div class="khu-ticks">${dots}</div>
         <div class="flex justify-between text-[11px] font-semibold text-slate-500 px-0.5 mt-1">
           <span>${left}</span><span class="text-slate-400">${mid}</span><span>${right}</span>
         </div>`}
