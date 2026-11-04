@@ -77,7 +77,7 @@ app.post('/api/match-ai', async (req, res) => {
     const fresh = new Map();
     for (const c of cached || []) {
       const r = byId.get(c.target_id);
-      if (r && sameTime(c.viewer_updated, me.updated_at) && sameTime(c.target_updated, r.post.updated_at)) fresh.set(c.target_id, c);
+      if (r && sameTime(c.viewer_updated, me.updated_at) && sameTime(c.target_updated, r.post.updated_at) && (c.prompt_ver ?? 1) >= ai.AI_PROMPT_VERSION) fresh.set(c.target_id, c);
     }
 
     // 5) 캐시에 없는 사람만 AI에 나눠서 물어봄 (20명씩 순서대로, 한 묶음이 실패해도 앞 결과는 살림)
@@ -96,7 +96,8 @@ app.post('/api/match-ai', async (req, res) => {
             target_id: p.user_id,
             viewer_updated: me.updated_at,
             target_updated: byId.get(p.user_id).post.updated_at,
-            adjust: p.adjust, summary: p.summary, good: p.good, warn: p.warn,
+            adjust: p.adjust, summary: p.summary, analysis: p.analysis, good: p.good, warn: p.warn, talk: p.talk,
+            prompt_ver: ai.AI_PROMPT_VERSION,
           }));
           if (rows.length) {
             const { error: upErr } = await sb.from('match_ai').upsert(rows, { onConflict: 'viewer_id,target_id' });
@@ -121,8 +122,10 @@ app.post('/api/match-ai', async (req, res) => {
         adjust: c ? c.adjust : 0,
         final: c ? ai.finalScore(ruleScore, c.adjust) : ruleScore,
         summary: c ? c.summary : '',
+        analysis: c?.analysis || '',
         good: c?.good || [],
         warn: c?.warn || [],
+        talk: c?.talk || [],
         ai: Boolean(c),   // AI 분석이 있는지 (없으면 팝업에서 안내 문구)
       };
     });

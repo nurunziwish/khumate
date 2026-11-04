@@ -337,15 +337,30 @@ const profileScrollMemo = { me: 0, roommate: 0 };
 const profileScroller = () => document.getElementById('profile-scroll');
 profileScroller()?.addEventListener('scroll', e => { profileScrollMemo[activeProfileTab] = e.target.scrollTop; });
 
+// 답안 보기 창: 탭을 바꿀 때만 탭별 스크롤 위치를 기억. 창을 닫았다 다시 열면 맨 위로 (resetViewScroll)
+let viewActiveTab = 'me';
+const viewScrollMemo = { me: 0, roommate: 0 };
+const viewScroller = () => document.getElementById('view-scroll');
+function resetViewScroll() {
+  viewActiveTab = 'me';
+  viewScrollMemo.me = 0; viewScrollMemo.roommate = 0;
+  const vs = viewScroller();
+  if (vs) vs.scrollTop = 0;
+}
+
 function showProfileTab(id, targetId = 'profile-sections') {
   const isEdit = targetId === 'profile-sections';
-  const scroller = profileScroller();
+  const isView = targetId === 'view-sections';
+  const scroller = isEdit ? profileScroller() : isView ? viewScroller() : null;
   // 탭을 바꾸기 전에 지금 탭의 위치를 저장 (패널을 숨기면 위치가 줄어들 수 있어서 먼저)
   if (isEdit && scroller && activeProfileTab !== id) profileScrollMemo[activeProfileTab] = scroller.scrollTop;
+  if (isView && scroller && viewActiveTab !== id) viewScrollMemo[viewActiveTab] = scroller.scrollTop;
   if (isEdit) activeProfileTab = id;
+  if (isView) viewActiveTab = id;
   document.querySelectorAll(`#${targetId} [data-panel]`).forEach(p => p.classList.toggle('hidden', p.dataset.panel !== id));
-  if (targetId === 'view-sections' && typeof relayoutViewCompare === 'function') relayoutViewCompare();   // 탭을 바꾸면 점 위치를 다시 잡음
+  if (isView && typeof relayoutViewCompare === 'function') relayoutViewCompare();   // 탭을 바꾸면 점 위치를 다시 잡음
   if (isEdit && scroller) scroller.scrollTop = profileScrollMemo[id] || 0;
+  if (isView && scroller) scroller.scrollTop = viewScrollMemo[id] || 0;
   document.querySelectorAll(`[data-tab-bar][data-target="${targetId}"] [data-profile-tab]`).forEach(b => {
     const on = b.dataset.profileTab === id;
     b.className = `py-2.5 rounded-xl text-sm font-bold border transition ${on ? 'bg-red-600 border-red-600 text-white shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:border-red-300'}`;

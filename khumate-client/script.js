@@ -475,6 +475,7 @@ async function openViewModal(userId) {
   document.getElementById('view-title').textContent = row.title;
   document.getElementById('view-meta').textContent =
     [row.gender, row.dorm_period, row.dept, `${row.student_id}학번`, `${row.birth_year}년생`].filter(Boolean).join(' · ');
+  resetViewScroll();
   renderProfileSections(row.answers || {}, 'view-sections');
 
   // AI 분석 결과가 있으면 답안 위에 보여 줌 (로그인한 사용자만 있음)
@@ -486,7 +487,11 @@ async function openViewModal(userId) {
   // 점수 설명: 각 질문 칸 바로 아래에 붙이고, 칸을 찾지 못한 항목만 아래 비교표에 남김
   const cmpBox = document.getElementById('view-compare');
   const canCompare = !!currentUser && !!myPost && row.user_id !== currentUser.id;
-  viewCompareCtx = canCompare ? { a: myPost.answers || {}, b: row.answers || {} } : null;
+  // 성별·거주 기간은 글의 열(column)에 있어서 답안과 합쳐서 비교에 넘김
+  viewCompareCtx = canCompare ? {
+    a: { gender: myPost.gender, dorm_period: myPost.dorm_period, ...(myPost.answers || {}) },
+    b: { gender: row.gender, dorm_period: row.dorm_period, ...(row.answers || {}) },
+  } : null;
   cmpBox.innerHTML = '';
   cmpBox.classList.add('hidden');
 
@@ -518,6 +523,7 @@ function openMyCardModal() {
   // 아직 아무것도 안 쓴 경우: 빈 답안을 그대로 채운 모양으로 띄움 (읽기 전용, 수정하기 버튼으로 수정창)
   document.getElementById('view-title').textContent = '내 매칭 카드';
   document.getElementById('view-meta').textContent = '';
+  resetViewScroll();
   renderProfileSections({}, 'view-sections');
   document.getElementById('view-ai').classList.add('hidden');
   document.getElementById('view-msg-btn').classList.add('hidden');
@@ -552,6 +558,7 @@ async function onNoteClick() {
 function closeViewModal() {
   const modal = document.getElementById('view-modal');
   if (modal) modal.classList.add('hidden');
+  resetViewScroll();   // 다시 열면 맨 위부터
 }
 document.addEventListener('keydown', e => {
   if (e.key !== 'Escape') return;
@@ -648,6 +655,7 @@ function aiCardHtml(r, rank) {
         <div class="h-full bg-gradient-to-r from-red-500 to-orange-400 rounded-full" style="width:${r.final}%"></div>
       </div>
       <p class="text-sm text-slate-700 leading-relaxed">${esc(r.summary)}</p>
+      ${r.analysis ? `<p class="text-xs text-slate-600 leading-relaxed">${esc(r.analysis)}</p>` : ''}
       ${good || warn ? `<div class="flex flex-wrap gap-1.5">${good}${warn}</div>` : ''}
       <p class="text-xs font-bold text-red-600 text-right">답안 보기 →</p>
     </div>`;
@@ -742,13 +750,33 @@ function tidyViewSections(a) {
   const scope = document.getElementById('view-sections');
   if (!scope) return;
   scope.querySelectorAll('input, textarea').forEach(el => { el.placeholder = ''; });
+  // 읽기 전용: 태그 × 버튼과 '전체 삭제' 버튼 제거
+  scope.querySelectorAll('[data-tag-remove], [data-tag-clear]').forEach(n => n.remove());
+  // 원하는 룸메 학과: 단과대 드롭다운 칸 숨기고, 학과 검색칸·안내 문구 숨김 (고른 학과 칩만 보임)
+  const deptEl = scope.querySelector('[data-fields~="rm_dept"]');
+  if (deptEl) {
+    deptEl.querySelectorAll('.khu-tags-wrap, .khu-tags-msg').forEach(n => { n.style.display = 'none'; });
+    const grid = deptEl.querySelector('.grid');
+    const collegeCell = [...deptEl.querySelectorAll('.grid > .min-w-0')].find(c => [...c.querySelectorAll('span')].some(s => s.textContent.trim() === '단과대'));
+    if (collegeCell) { collegeCell.style.display = 'none'; if (grid) grid.style.gridTemplateColumns = '1fr'; }
+  }
   const hobbyEl = scope.querySelector('[data-fields~="hobby"]');
   if (hobbyEl) {
     hobbyEl.querySelectorAll('.khu-tags-wrap, .khu-tags-msg').forEach(n => { n.style.display = 'none'; });
     const mine = [].concat(a.hobby || []).map(String);
-    hobbyEl.querySelectorAll('*').forEach(x => {
-      if (x.children.length || !mine.includes(x.textContent.trim())) return;
-      const chip = x.closest('span, div') || x;
+    // 칩은 '#취미명' 텍스트 + × 버튼으로 이루어져 있어서, 칩의 글자(텍스트 노드)만 보고 비교
+    hobbyEl.querySelectorAll('.khu-tags-chips > span').forEach(chip => {
+      const t = [...chip.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join('').trim().replace(/^#/, '');
+      if (!mine.includes(t)) return;
+      chip.style.background = '#ecfdf5'; chip.style.color = '#047857'; chip.style.borderColor = '#6ee7b7';
+    });
+  }
+  // 원하는 룸메 학과 칩: 내 학과와 같은 칩은 초록, '상관없음'은 항상 초록
+  if (deptEl) {
+    const myDept = a.dept ? String(a.dept) : '';
+    deptEl.querySelectorAll('.khu-tags-chips > span').forEach(chip => {
+      const t = chip.textContent.trim();
+      if (!(t === '상관없음' || (myDept && t === myDept))) return;
       chip.style.background = '#ecfdf5'; chip.style.color = '#047857'; chip.style.borderColor = '#6ee7b7';
     });
   }
@@ -779,11 +807,25 @@ function inlineCompare(a, b) {
     if (lab) lab.insertAdjacentHTML('afterend', wrap);
     else el.insertAdjacentHTML('afterbegin', wrap);
   };
+  // 수면 시간·학과처럼 한 묶음 안에 칸이 나란히 있는 항목은, 해당 칸 바로 위에 알약을 붙임
+  const SUBS = { sleep_time: '취침', wake_time: '기상', rm_sleep_time: '취침', rm_dept: '학과' };
+  const placeIn = (el, key, html) => {
+    if (!el) return;
+    const sub = SUBS[key];
+    const cell = sub && [...el.querySelectorAll('.grid > .min-w-0')].find(c => [...c.querySelectorAll('span')].some(s => s.textContent.trim() === sub));
+    if (!cell) return addPill(el, html);
+    cell.insertAdjacentHTML('afterbegin', `<div class="khu-cmp mb-1.5">${html}</div>`);
+  };
   const tally = { me: { ok: 0, total: 0 }, roommate: { ok: 0, total: 0 } };
 
   for (const d of DIMENSIONS) {
     if (!d.pref) {
       // 허용 범위가 없는 항목: 답끼리 얼마나 맞는지 (행거·냉장고 공유 의사 등). 취미·이미 알약 붙은 칸은 건너뜀
+      if (d.key === 'rhythm') {   // 생활 리듬: 기상 칸 위에 한 줄
+        const sv = d.sim(a, b);
+        if (isVal(sv)) { const ok = sv >= 0.5; placeIn(fieldEl('sleep_time', 'me'), 'wake_time', pill(ok, `생활 리듬 ${ok ? '겹침 ✅' : '안 겹침 ❌'}`)); }
+        continue;
+      }
       const meKeyS = d.uses.find(k => !/^rm_/.test(k));
       if (!meKeyS || meKeyS === 'hobby' || !d.sim) continue;
       const el = fieldEl(meKeyS, 'me');
@@ -807,19 +849,45 @@ function inlineCompare(a, b) {
     const pa = anyA ? 1 : d.pref(a, b);   // 내 룸메 허용 범위 ↔ 상대 정보
     const pb = anyB ? 1 : d.pref(b, a);   // 상대 룸메 허용 범위 ↔ 내 정보
 
+    if (d.key === 'dept') {
+      // 학과: 나의 학과 칸 → 내가 원하는 학과 안에 상대 학과가 있는지 / 원하는 룸메 학과 칸 → 상대가 원하는 학과 안에 내 학과가 있는지
+      const deptEl = fieldEl('dept', 'me');
+      if (deptEl && isVal(pa)) {
+        const ok = pa >= 0.999;
+        addPill(deptEl, pill(ok, anyA ? '내 원하는 학과: 상관없음 ✅' : `내 원하는 학과에 상대 학과 포함 ${ok ? '✅' : '❌'}`));
+        tally.me.total++; if (ok) tally.me.ok++;
+      }
+      const rmDeptEl = fieldEl('rm_dept', 'roommate');
+      if (rmDeptEl && isVal(pb)) {
+        const ok = pb >= 0.999;
+        placeIn(rmDeptEl, 'rm_dept', pill(ok, anyB ? '상대 원하는 학과: 상관없음 ✅' : `상대 원하는 학과에 내 학과 포함 ${ok ? '✅' : '❌'}`));
+        tally.roommate.total++; if (ok) tally.roommate.ok++;
+      }
+      continue;
+    }
+
     const infoEl = fieldEl(meKey, 'me');
     if (infoEl && isVal(pa)) {
       const ok = pa >= 0.999;
-      addPill(infoEl, pill(ok, `내 룸메 허용 범위: ${esc(valueText(rmKey, a[rmKey]))} ${ok ? '✅' : '❌'}`));
+      placeIn(infoEl, meKey, pill(ok, `내 룸메 허용 범위: ${esc(valueText(rmKey, a[rmKey]))} ${ok ? '✅' : '❌'}`));
       tally.me.total++; if (ok) tally.me.ok++;
     }
     const rmEl = fieldEl(rmKey, 'roommate');
     if (rmEl && isVal(pb)) {
       const ok = pb >= 0.999;
-      addPill(rmEl, pill(ok, `내 정보: ${esc(valueText(meKey, a[meKey]))} ${ok ? '✅' : '❌'}`));
+      placeIn(rmEl, rmKey, pill(ok, `내 정보: ${esc(valueText(meKey, a[meKey]))} ${ok ? '✅' : '❌'}`));
       tally.roommate.total++; if (ok) tally.roommate.ok++;
     }
   }
+
+  // 성별·거주 기간: 원하는 룸메 칸은 나와 같게 고정돼 있어서, 상대 값이 같은지 알약으로
+  [['rm_fixed_gender', 'gender', '성별'], ['rm_fixed_dorm', 'dorm_period', '거주 기간']].forEach(([name, key, label]) => {
+    const el = fieldEl(name, 'roommate');
+    if (!el || !b[key]) return;
+    const ok = b[key] === a[key];
+    addPill(el, pill(ok, `상대 ${label}: ${esc(b[key])} ${ok ? '✅' : '❌'}`));
+    tally.roommate.total++; if (ok) tally.roommate.ok++;
+  });
 
   // 탭 맨 위 요약 + 범례
   const score = matchScore(a, b);
@@ -861,8 +929,10 @@ function aiBoxHtml(ai) {
     <div class="bg-red-50/60 border border-red-100 text-slate-700 rounded-xl p-4 text-xs leading-relaxed space-y-2">
       <p class="font-bold text-red-600">🤖 AI 분석 <span class="font-normal text-slate-500">· 규칙 ${ai.rule_score}점 → AI 보정 ${adj} → 최종 ${ai.final}점</span></p>
       <p>${esc(ai.summary)}</p>
+      ${ai.analysis ? `<p class="text-slate-600">${esc(ai.analysis)}</p>` : ''}
       ${ai.good?.length ? `<p><span class="text-emerald-600 font-bold">✔ 잘 맞는 점</span> ${ai.good.map(esc).join(' · ')}</p>` : ''}
       ${ai.warn?.length ? `<p><span class="text-amber-600 font-bold">⚠ 확인해 보세요</span> ${ai.warn.map(esc).join(' · ')}</p>` : ''}
+      ${ai.talk?.length ? `<p><span class="text-red-600 font-bold">💬 맞춰 볼 것</span> ${ai.talk.map(esc).join(' · ')}</p>` : ''}
     </div>`;
 }
 
