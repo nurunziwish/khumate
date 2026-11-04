@@ -344,6 +344,7 @@ function showProfileTab(id, targetId = 'profile-sections') {
   if (isEdit && scroller && activeProfileTab !== id) profileScrollMemo[activeProfileTab] = scroller.scrollTop;
   if (isEdit) activeProfileTab = id;
   document.querySelectorAll(`#${targetId} [data-panel]`).forEach(p => p.classList.toggle('hidden', p.dataset.panel !== id));
+  if (targetId === 'view-sections' && typeof relayoutViewCompare === 'function') relayoutViewCompare();   // 탭을 바꾸면 점 위치를 다시 잡음
   if (isEdit && scroller) scroller.scrollTop = profileScrollMemo[id] || 0;
   document.querySelectorAll(`[data-tab-bar][data-target="${targetId}"] [data-profile-tab]`).forEach(b => {
     const on = b.dataset.profileTab === id;

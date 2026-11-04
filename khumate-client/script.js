@@ -486,7 +486,7 @@ async function openViewModal(userId) {
   // 점수 설명: 각 질문 칸 바로 아래에 붙이고, 칸을 찾지 못한 항목만 아래 비교표에 남김
   const cmpBox = document.getElementById('view-compare');
   const canCompare = !!currentUser && !!myPost && row.user_id !== currentUser.id;
-  if (canCompare) inlineCompare(myPost.answers || {}, row.answers || {});
+  viewCompareCtx = canCompare ? { a: myPost.answers || {}, b: row.answers || {} } : null;
   cmpBox.innerHTML = '';
   cmpBox.classList.add('hidden');
 
@@ -509,6 +509,7 @@ async function openViewModal(userId) {
   const scope = document.getElementById('view-sections');
   scope.querySelectorAll('input, select, textarea, button').forEach(el => { el.disabled = true; el.tabIndex = -1; });
   document.getElementById('view-modal').classList.remove('hidden');
+  relayoutViewCompare();
 }
 // 하단 "내 매칭카드" 버튼: 내 카드 모달을 연다 (거기서 수정하기 → 수정창). 카드가 아직 없으면 바로 수정창
 function openMyCardModal() {
@@ -699,11 +700,16 @@ function valueText(key, v) {
 //  - 룸메 탭 선택지: 내 정보가 허용되는 선택지는 초록, 멀수록 노랑→빨강
 //  - 룸메 탭 범위 슬라이더: 내 정보 값을 점으로 표시, 범위 안이면 초록 테두리 / 밖이면 빨강
 //  - 정보 탭 슬라이더: 선 색은 숨기고, 내 룸메 허용 범위를 초록 띠로 표시
+let viewCompareCtx = null;   // 지금 보기 모달의 내 답·상대 답 (탭을 바꾸면 다시 그림)
+function relayoutViewCompare() {
+  if (!viewCompareCtx) return;
+  inlineCompare(viewCompareCtx.a, viewCompareCtx.b);
+}
 function inlineCompare(a, b) {
   const scope = document.getElementById('view-sections');
   if (!scope) return;
+  scope.querySelectorAll('.khu-cmp').forEach(el => el.remove());   // 이전 표시 지우고 다시 그림
   const fieldEl = (name, panel) => scope.querySelector(`[data-panel="${panel}"] [data-fields~="${name}"]`);
-  const optionValues = name => (allFields().find(f => f.name === name)?.options || []).map(o => o.value);
   const GREEN = { bg: '#ecfdf5', border: '#6ee7b7' };
   // 0 = 빨강(멀리), 1 에 가까울수록 노랑 (hue 0 → 45)
   const warm = p => { const h = Math.round(45 * Math.max(0, Math.min(1, p))); return { bg: `hsl(${h} 90% 95%)`, border: `hsl(${h} 85% 60%)` }; };
@@ -718,12 +724,11 @@ function inlineCompare(a, b) {
 
     // 1) 룸메 탭: 선택지 칸 (범위 선택지 = 라디오·체크박스)
     const rmEl = fieldEl(rmKey, 'roommate');
-    const opts = optionValues(rmKey);
-    if (rmEl && opts.length) {
-      for (const v of opts) {
-        const input = rmEl.querySelector(`input[name="${rmKey}"][value="${v}"]`);
-        if (!input) continue;
-        const box = input.closest('label') || input.closest('.radio-box') || input.parentElement;
+    const inputs = rmEl ? Array.from(rmEl.querySelectorAll(`input[name="${rmKey}"]`)) : [];
+    if (inputs.length) {
+      for (const input of inputs) {
+        const v = input.value;
+        const box = input.closest('.radio-box') || input.closest('label') || input.parentElement;
         const p = v === 'any' ? 1 : d.pref({ ...b, [rmKey]: v }, a);   // 이 선택지를 골랐을 때 내 정보가 맞는지
         if (!isVal(p)) continue;
         paint(box, p >= 0.999 ? GREEN : warm(p));
@@ -731,7 +736,7 @@ function inlineCompare(a, b) {
     }
 
     // 2) 룸메 탭: 범위 슬라이더 — 내 정보 값을 점으로, 범위 안이면 초록 테두리 / 밖이면 빨강
-    if (rmEl && !opts.length && isVal(a[meKey])) {
+    if (rmEl && !inputs.length && isVal(a[meKey])) {
       const cont = rmEl.querySelector('.khu-dual, .khu-span');
       const inp = cont?.querySelector('input[type=range]');
       const v = Number(a[meKey]);
@@ -740,7 +745,8 @@ function inlineCompare(a, b) {
         const pos = Math.max(0, Math.min(1, (v - min) / (max - min)));
         const ok = anyB || d.pref(b, a) >= 0.999;
         cont.style.position = 'relative';
-        cont.insertAdjacentHTML('beforeend', `<div style="position:absolute;top:50%;left:calc(8px + (100% - 16px) * ${pos});transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid ${ok ? '#10b981' : '#ef4444'};box-shadow:0 2px 6px rgb(15 23 42 / .2);pointer-events:none;z-index:2"></div>`);
+        const topPx = inp.offsetTop + inp.offsetHeight / 2;
+        cont.insertAdjacentHTML('beforeend', `<div class="khu-cmp" style="position:absolute;top:${topPx}px;left:calc(8px + (100% - 16px) * ${pos});transform:translate(-50%,-50%);width:16px;height:16px;border-radius:50%;background:#fff;border:3px solid ${ok ? '#10b981' : '#ef4444'};box-shadow:0 2px 6px rgb(15 23 42 / .2);pointer-events:none;z-index:2"></div>`);
       }
     }
 
@@ -756,7 +762,8 @@ function inlineCompare(a, b) {
         const R = Math.max(0, Math.min(1, (range.hi - min) / (max - min)));
         inp.style.background = 'transparent';
         wrap.style.position = 'relative';
-        wrap.insertAdjacentHTML('afterbegin', `<div style="position:absolute;top:6px;height:6px;border-radius:999px;left:calc(8px + (100% - 16px) * ${L});width:calc((100% - 16px) * ${Math.max(0, R - L)});background:linear-gradient(to right,#6ee7b7,#10b981);pointer-events:none"></div>`);
+        const bandTop = inp.offsetTop + (inp.offsetHeight - 6) / 2;
+        wrap.insertAdjacentHTML('afterbegin', `<div class="khu-cmp" style="position:absolute;top:${bandTop}px;height:6px;border-radius:999px;left:calc(8px + (100% - 16px) * ${L});width:calc((100% - 16px) * ${Math.max(0, R - L)});background:linear-gradient(to right,#6ee7b7,#10b981);pointer-events:none"></div>`);
       }
     }
   }
