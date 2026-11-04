@@ -137,7 +137,12 @@ app.post('/api/match-ai', async (req, res) => {
 // 화면 파일 제공
 app.use(express.static(path.join(__dirname, '..', 'khumate-client')));
 
-app.listen(PORT, () => {
-  console.log(`✅ 서버 실행 중: http://localhost:${PORT}`);
-  console.log(AI_ENABLED ? '🤖 AI 분석 사용 가능' : 'ℹ️ AI 설정이 없어서 규칙 점수만 사용합니다. (CHATBOT_* 설정 시 AI 사용)');
-});
+// 로컬에서 직접 실행할 때만 포트를 열고, Vercel 같은 곳에서는 app 을 함수로 넘겨 씀
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`✅ 서버 실행 중: http://localhost:${PORT}`);
+    console.log(AI_ENABLED ? '🤖 AI 분석 사용 가능' : 'ℹ️ AI 설정이 없어서 규칙 점수만 사용합니다. (CHATBOT_* 설정 시 AI 사용)');
+  });
+}
+
+module.exports = app;
