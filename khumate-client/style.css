@@ -13,3 +13,115 @@ body {
   background: #cbd5e1;
   border-radius: 3px;
 }
+
+/* 라디오/체크박스 선택 시 박스 전체 강조 (JS 불필요) */
+.radio-box:has(input:checked) {
+  border-color: #ef4444;
+  background-color: rgb(254 242 242 / 0.5);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+}
+
+
+/* ================= 슬라이더 (부드러운 트랙 + 눈금 + 흰 손잡이) ================= */
+.khu-slider { position: relative; padding: 6px 8px 0; }
+.khu-slider input[type=range] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 6px; border-radius: 999px; outline: none; cursor: pointer;
+  background: linear-gradient(to right, #fca5a5 0%, #f87171 var(--pct, 50%), #e2e8f0 var(--pct, 50%), #e2e8f0 100%);
+}
+.khu-slider input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; border: 2.5px solid #f87171;
+  box-shadow: 0 2px 6px rgb(15 23 42 / 0.18);
+  transition: transform .15s, box-shadow .15s;
+}
+.khu-slider input[type=range]::-moz-range-thumb {
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #fff; border: 2.5px solid #f87171;
+  box-shadow: 0 2px 6px rgb(15 23 42 / 0.18);
+}
+.khu-slider input[type=range]::-moz-range-track { background: transparent; }
+.khu-slider input[type=range]:active::-webkit-slider-thumb { transform: scale(1.12); box-shadow: 0 0 0 6px rgb(248 113 113 / 0.18); }
+.khu-slider input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 6px rgb(248 113 113 / 0.25); }
+
+/* 5칸 눈금: 손잡이 중심 위치와 맞도록 좌우 11px 안쪽에 배치 */
+.khu-ticks { display: flex; justify-content: space-between; padding: 6px 8px 0; pointer-events: none; }
+.khu-ticks i { width: 4px; height: 4px; border-radius: 50%; background: #cbd5e1; }
+
+/* ================= 드롭다운 (단과대 서식 공통) ================= */
+.khu-combo::after {
+  content: '▾'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  color: #94a3b8; font-size: 11px; pointer-events: none;
+}
+.khu-combo-input[readonly] { caret-color: transparent; }
+/* 펼쳐져 있으면 화살표를 ▴ 로 (목록이 열린 칸에만 적용) */
+.khu-combo:has(> .khu-list:not(.hidden))::after { content: '▴'; }
+
+/* 태그 입력칸(드롭다운+중복 선택): 드롭다운과 같은 화살표 */
+.khu-tags-wrap::after {
+  content: '▾'; position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  color: #94a3b8; font-size: 11px; pointer-events: none;
+}
+.khu-tags-wrap:has(> .khu-tag-list:not(.hidden))::after { content: '▴'; }
+
+/* 학번·나이 범위: 위 슬라이더와 같은 막대·손잡이 서식에 손잡이를 두 개 둠 (손잡이 중심은 양끝 8px 안쪽) */
+.khu-dual { position: relative; height: 6px; }
+.khu-dual-track { position: absolute; top: 0; bottom: 0; left: 8px; right: 8px; border-radius: 999px; background: #e2e8f0; }
+.khu-span-fill { position: absolute; top: 0; bottom: 0; border-radius: 999px; background: linear-gradient(to right, #fca5a5, #f87171); }
+/* 내 매칭 카드 강조: 사이트 로고(KHUMATE)와 같은 빨강→주황 그라데이션을 글씨와 테두리에만 씀 */
+.khu-grad-text { background: linear-gradient(to right, #dc2626, #f97316); -webkit-background-clip: text; background-clip: text; color: transparent; }
+/* 내 매칭 카드 전용 얇은 그라데이션 테두리: 1.5px 링 + 은은한 붉은 그림자로 다른 카드와 구분 */
+.khu-grad-border { padding: 1.5px; border-radius: 1.125rem; background: linear-gradient(135deg, #dc2626 0%, #f97316 100%); box-shadow: 0 12px 28px -14px rgba(220, 38, 38, 0.45); }
+.khu-grad-border > div { border-radius: calc(1.125rem - 1.5px); }
+.khu-dual input[type=range] {
+  position: absolute; left: 0; top: 0; width: 100%; height: 6px; margin: 0;
+  background: transparent; outline: none; pointer-events: none;
+  -webkit-appearance: none; appearance: none;
+}
+.khu-dual input[type=range]::-webkit-slider-runnable-track { height: 6px; background: transparent; }
+.khu-dual input[type=range]::-moz-range-track { background: transparent; }
+/* 손잡이를 막대 한가운데에 맞춤 (테두리 포함 16px, 막대 6px → 위아래 5px 여유) */
+.khu-dual input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none; pointer-events: auto; cursor: pointer;
+  box-sizing: border-box; margin-top: -5px;
+  width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; border: 2.5px solid #f87171;
+  box-shadow: 0 2px 6px rgb(15 23 42 / 0.18);
+  transition: transform .15s, box-shadow .15s;
+}
+.khu-dual input[type=range]::-moz-range-thumb {
+  pointer-events: auto; cursor: pointer; box-sizing: border-box; width: 16px; height: 16px; border-radius: 50%;
+  background: #fff; border: 2.5px solid #f87171;
+  box-shadow: 0 2px 6px rgb(15 23 42 / 0.18);
+}
+.khu-dual input[type=range]:active::-webkit-slider-thumb { transform: scale(1.12); box-shadow: 0 0 0 6px rgb(248 113 113 / 0.18); }
+.khu-span.khu-unset .khu-span-fill { display: none; }
+.khu-span.khu-unset input[type=range]::-webkit-slider-thumb { border-color: #cbd5e1; }
+.khu-span.khu-unset input[type=range]::-moz-range-thumb { border-color: #cbd5e1; }
+
+/* 시간 선택기 안쪽(박스 하나에 시:분) — 화살표 숨김, 선택 시 강조 */
+.khu-bare::after { display: none; }
+.khu-bare .khu-combo-input:hover, .khu-bare .khu-combo-input:focus { background: #fef2f2; border-radius: 6px; }
+.khu-time .khu-list { min-width: 4rem; left: 50%; transform: translateX(-50%); text-align: center; }
+
+/* ================= 미응답(기본값 없음) 표시 ================= */
+/* 아직 안 건드린 슬라이더: 단일 슬라이더는 기본 위치(중앙)까지 색이 채워진 채로 보이고(안내 문구로 미응답 표시),
+   범위 슬라이더(.khu-span)만 회색 트랙 + 흐린 손잡이로 보임 */
+.khu-span.khu-unset input[type=range] { background: #e2e8f0 !important; opacity: .75; }
+.khu-span.khu-unset input[type=range]::-webkit-slider-thumb { border-color: #cbd5e1; }
+.khu-span.khu-unset input[type=range]::-moz-range-thumb { border-color: #cbd5e1; }
+
+/* 학번·나이 범위 눈금 (손잡이 위치와 같은 간격, 가운데 칸은 내 값) */
+.khu-tick-row { position: relative; height: 36px; margin-top: 14px; }   /* 손잡이 아래쪽 여유 */
+.khu-tick { position: absolute; top: 0; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; font-size: 10px; font-weight: 600; }
+.khu-tick i { width: 4px; height: 4px; border-radius: 50%; background: #cbd5e1; }
+.khu-tick span { margin-top: 4px; white-space: nowrap; color: #64748b; }
+.khu-tick .khu-mine { color: #dc2626; font-weight: 900; }
+
+/* 필수 항목을 비운 채 게시하려 할 때 */
+.khu-missing { outline: 2px solid #f87171; outline-offset: 6px; border-radius: 4px; }
+/* 선택지 바로 밑에 열리는 하위 질문 (청소 주기, 냉장고·행거 의사 등) */
+.khu-nest { margin: 2px 0 4px 26px; padding: 10px 12px; border-left: 3px solid #fecaca; background: #fff; border-radius: 0 10px 10px 0; }
+.khu-nest .khu-tick-steps { height: 30px; margin-top: 2px; }
+.khu-tick-steps { height: 30px; margin-top: 2px; }

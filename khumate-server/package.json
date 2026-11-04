@@ -1,19 +1,15 @@
 {
   "name": "khumate-server",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "description": "KHUMATE - 화면(client)을 보여주고 Supabase 설정을 전달하는 최소 서버",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js"
   },
-  "keywords": [],
-  "author": "",
   "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
-    "@supabase/supabase-js": "^2.117.3",
-    "cors": "^2.8.6",
-    "dotenv": "^18.0.7",
-    "express": "^5.3.0"
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "@supabase/supabase-js": "^2.45.0"
   }
 }

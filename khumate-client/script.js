@@ -1,5 +1,7 @@
 // ================= 1. 탭 전환 기능 =================
 function switchTab(tabName) {
+  if (tabName === 'chatting') setTimeout(renderInbox, 0);   // 메시지함 탭을 열면 최신 목록
+  if (tabName === 'houserule') setTimeout(renderHouseRule, 0);   // 하우스룰: 확정된 룸메의 카드 (matches.js)
   const tabs = ['matching', 'chatting', 'houserule'];
   
   tabs.forEach(t => {
@@ -28,277 +30,699 @@ function closeFilterModal() {
   if (modal) modal.classList.add('hidden');
 }
 
-function openProfileEdit() {
-  const modal = document.getElementById('profile-modal');
-  if (modal) modal.classList.remove('hidden');
-}
-function closeProfileEdit() {
-  const modal = document.getElementById('profile-modal');
-  if (modal) modal.classList.add('hidden');
+// 이전 버전 질문지로 쓴 글은 기본값이 섞여 있어서 폼을 비워서 다시 받습니다.
+function answersForForm(post) {
+  return post && (post.schema_version ?? 0) >= SCHEMA_VERSION ? (post.answers || {}) : {};
 }
 
-// ================= 3. 카드 목록 및 로컬 데이터 관리 =================
-function loadDummyCards() {
-  const cardContainer = document.getElementById('card-list-container');
-  if (!cardContainer) return;
-  
-  cardContainer.innerHTML = "";
-  
-  // 로컬 스토리지 데이터 불러오기 (없으면 더미 데이터 초기 설정)
-  let posts = JSON.parse(localStorage.getItem('khumate_posts')) || [];
-  
-  if (posts.length === 0) {
-    posts = [
-      {
-        gender: "남성",
-        dormPeriod: "한 학기",
-        dept: "전자공학과",
-        studentId: "24학번",
-        birthYear: "2005년생",
-        title: "룸메이트 구해요"
-      },
-      {
-        gender: "여성",
-        dormPeriod: "연간(1년)",
-        dept: "컴퓨터공학과",
-        studentId: "23학번",
-        birthYear: "2004년생",
-        title: "조용하고 깔끔하신 분 맞춰봐요!"
-      }
-    ];
-    localStorage.setItem('khumate_posts', JSON.stringify(posts));
+function openProfileEdit() {
+  resetMissingWatch();
+  if (!currentUser) {   // 로그인 필요
+    openAuthModal('login');
+    setMsg('로그인하면 내 정보를 작성할 수 있어요.', false);
+    return;
   }
-  
-  // 요구사항 구조 적용:
-  // 1단: 성별 / 거주기간 (붉은색 강조)
-  // 2단: 게시글 제목 (크게)
-  // 3단: 학과 / 학번 / 나이(출생년도)
-  posts.forEach(post => {
-    const card = document.createElement('div');
-    card.className = "bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition space-y-2.5";
-    card.innerHTML = `
-      <!-- 1단: 성별 & 거주기간 (붉은색 강조 태그) -->
+  // 임시 저장한 내용이 있으면 그걸, 없으면 이미 올린 글의 답안을 폼에 채워서 보여줌
+  const draft = readDraft();
+  renderProfileSections(draft ? draft.answers : answersForForm(myPost));
+  const title = document.getElementById('post-title');
+  title.value = draft ? draft.title : (myPost?.title || '');
+  title.maxLength = 60;
+  profileBaseline = formSnapshot();   // 연 직후 상태: 나중에 달라졌는지 확인하는 기준
+  document.getElementById('profile-modal').classList.remove('hidden');
+  if (draft) showToast('임시 저장한 내용을 불러왔어요.');
+}
+
+// ---------- 임시 저장 (저장하기 버튼) ----------
+// 게시 전에 작성 중인 내용을 이 브라우저(localStorage)에 사용자별로 보관합니다. DB·목록에는 영향 없음.
+// 질문지 버전이 바뀌면(SCHEMA_VERSION) 예전 임시 저장은 무시합니다.
+const draftKey = () => `khumate-draft:${currentUser?.id}`;
+function readDraft() {
+  try {
+    const d = JSON.parse(localStorage.getItem(draftKey()));
+    return d && d.v === SCHEMA_VERSION && d.answers ? d : null;
+  } catch { return null; }
+}
+function clearDraft() { try { localStorage.removeItem(draftKey()); } catch {} }
+
+async function saveDraft() {
+  if (!currentUser) { closeProfileEdit(true); return openAuthModal('login'); }
+  if (!(await khuConfirm('지금 내용 그대로 비공개 상태로 저장할까요?\n목록에서는 내려가고, 게시하기를 누르면 다시 올라가요.', { okText: '저장' }))) return;
+  const title = document.getElementById('post-title').value;
+  const p = collectProfile();   // 안 고른 항목은 null/'' 로 저장 → 다시 열면 미응답 상태 그대로
+  // 1) 이 브라우저에 보관 (기존 방식)
+  let ok = true;
+  try { localStorage.setItem(draftKey(), JSON.stringify({ v: SCHEMA_VERSION, title, answers: p })); }
+  catch { ok = false; }
+  // 2) 카드도 DB에 임시저장 (목록·매칭에는 안 뜸). 필수 항목 없이 있는 만큼 저장 (빈 칸은 null)
+  const studentId = digits(p.student_id), birthYear = digits(p.birth_year);
+  const yearOk = birthYear.length === 4 && +birthYear >= 1980 && +birthYear <= 2019;
+  let dbMsg = '카드를 보관했어요. 게시하기를 눌러야 목록에 올라가요.';
+  try {
+    await savePost({
+      user_id: currentUser.id,
+      title: title.trim().slice(0, 60) || '룸메이트 구해요',
+      gender: p.gender || null, dorm_period: p.dorm_period || null, dept: p.dept || '',
+      student_id: studentId.length === 2 ? studentId : null,
+      birth_year: yearOk ? birthYear : null,
+      answers: { ...p, student_id: studentId.length === 2 ? studentId : '', birth_year: yearOk ? birthYear : '' },
+      schema_version: SCHEMA_VERSION,
+      status: 'draft',
+    });
+    if (myPost?.status === 'published') dbMsg = '카드를 보관했어요. 목록에서 내려갔으니, 게시하기를 눌러야 다시 올라가요.';
+  } catch (e) { console.error(e); dbMsg = '카드 보관에 실패했어요. 인터넷 연결을 확인해 주세요.'; }
+  closeProfileEdit(true);
+  showToast(ok ? dbMsg : '이 브라우저에서는 임시 저장을 할 수 없어요.');
+  await loadPosts();
+}
+
+// 잠깐 떴다 사라지는 안내 문구
+// ================= 사이트 서식 팝업 (브라우저 기본 창 대신) =================
+// khuConfirm(문구) → 확인이면 true, 취소면 false / khuAlert(문구) → 확인만 있는 안내
+function khuDialog({ message, okText = '확인', cancelText = null }) {
+  return new Promise(resolve => {
+    document.getElementById('khu-dialog')?.remove();
+    const wrap = document.createElement('div');
+    wrap.id = 'khu-dialog';
+    wrap.className = 'fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4';
+    wrap.innerHTML = `
+      <div class="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
+        <div class="border-b border-slate-100 px-5 py-3">
+          <p class="text-red-600 font-black tracking-tight">KHUMATE</p>
+        </div>
+        <div class="px-5 py-5">
+          <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">${esc(message)}</p>
+        </div>
+        <div class="px-5 pb-5 flex gap-2">
+          ${cancelText ? `<button data-r="0" class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">${esc(cancelText)}</button>` : ''}
+          <button data-r="1" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-sm transition">${esc(okText)}</button>
+        </div>
+      </div>`;
+    const close = v => {
+      wrap.remove();
+      document.removeEventListener('keydown', onKey);
+      resolve(v);
+    };
+    const onKey = e => {
+      if (e.key === 'Escape' && cancelText) close(false);
+      if (e.key === 'Enter') close(true);
+    };
+    wrap.addEventListener('click', e => {
+      const b = e.target.closest('button[data-r]');
+      if (b) close(b.dataset.r === '1');
+    });
+    document.addEventListener('keydown', onKey);
+    document.body.appendChild(wrap);
+    wrap.querySelector('button[data-r="1"]').focus();
+  });
+}
+const khuConfirm = (message, opts = {}) => khuDialog({ message, cancelText: '취소', okText: '확인', ...opts });
+const khuAlert = message => khuDialog({ message });
+
+function showToast(text) {
+  document.getElementById('khu-toast')?.remove();
+  const el = document.createElement('div');
+  el.id = 'khu-toast';
+  el.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-lg max-w-[90vw] text-center';
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 2600);
+}
+// 수정 중 내용이 바뀌었는지 비교하기 위한 기준 (openProfileEdit 에서 정함)
+let profileBaseline = null;
+// 화면에 있는 입력칸 값 전체를 기준으로 비교 (제목·답안·시간 선택 칸의 숨은 값까지 포함)
+const formSnapshot = () => JSON.stringify(
+  [...(document.getElementById('profile-modal')?.querySelectorAll('input, textarea') || [])].map(el =>
+    [el.value, el.checked ?? null, el.dataset?.touched ?? null]));
+
+// force: 저장한 뒤 닫는 경우처럼 확인이 필요 없을 때 true. 그 밖(✕ 버튼 등)에서 바뀐 내용이 있으면 확인창을 띄움
+async function closeProfileEdit(force = false) {
+  const modal = document.getElementById('profile-modal');
+  if (!modal) return;
+  if (!force && profileBaseline !== null && formSnapshot() !== profileBaseline
+      && !(await khuConfirm('저장하지 않은 내용이 있어요.\n저장하지 않고 닫을까요?', { okText: '닫기' }))) return;
+  profileBaseline = null;
+  modal.classList.add('hidden');
+}
+
+// ================= 3. 글 목록 + 매칭 (Supabase DB) =================
+let currentUser = null;     // 로그인한 사용자 (auth.js 가 알려줌)
+let myPost = null;          // 내가 올린 글 (없으면 null)
+let listState = null;       // 마지막으로 불러온 목록 { mode, ranked | browse }
+let sortMode = 'match';     // 'match'(매칭순) | 'latest'(최신순)
+let loadedUserId;           // 목록을 마지막으로 불러온 사용자 id (undefined = 아직 안 불러옴)
+let loadSeq = 0;
+let aiByUid = new Map();    // AI 분석 결과 (user_id → { rule_score, adjust, final, summary, good, warn })
+let aiRunning = false;            // 오래된 응답이 새 응답을 덮어쓰지 않게 하는 번호
+
+// 로그인 상태가 바뀔 때 호출됨 (auth.js).
+// 탭 복귀·토큰 갱신 때도 호출되므로, 사용자가 실제로 바뀐 경우에만 다시 불러옴
+function onAuthChanged(session) {
+  currentUser = session?.user ?? null;
+  const id = currentUser?.id ?? null;
+  if (id === loadedUserId) return;
+  loadedUserId = id;
+  aiByUid.clear(); aiLatest = null; aiNote = ''; aiError = '';
+  loadPosts();
+}
+
+// 숫자만 남기기 ("24학번" → "24")
+const digits = v => String(v ?? '').replace(/\D/g, '');
+
+// 매칭률 배지 색 (80↑ 진한 빨강, 60↑ 주황, 그 아래 회색)
+// 매칭률 배지 색: 점수가 높을수록 진함 (6단계)
+const scoreTone = score => score >= 90 ? 'bg-red-700'
+  : score >= 80 ? 'bg-red-600'
+  : score >= 70 ? 'bg-red-500'
+  : score >= 60 ? 'bg-orange-500'
+  : score >= 50 ? 'bg-orange-400'
+  : 'bg-slate-400';
+
+function matchBadgeHtml(m) {
+  return `<span class="ml-auto px-2 py-0.5 ${scoreTone(m.score)} text-white rounded-md">${m.conflict ? '⚠ ' : ''}매칭률 ${m.score}%</span>`;
+}
+
+// post: DB 행 / match: matchScore() 결과 (내 글이거나 둘러보기면 null)
+const MY_STATUS_LABEL = { published: '공개 중', draft: '비공개 중', archived: '비공개 중' };
+
+function cardHtml(post, match = null, plain = false) {
+  const mine = !plain && currentUser && post.user_id === currentUser.id;   // plain: 읽기 전용 (확정 카드 복사본)
+  const blank = !!post.blank;   // 아직 카드를 쓰지 않은 내 칸 (미리보기용, 저장된 글 아님)
+  // 나와 같은 성별·거주 기간인 남의 카드는 살짝 붉게 구분 (목록에서만)
+  const sameCond = !plain && !mine && !!myPost && post.gender === myPost.gender && post.dorm_period === myPost.dorm_period;
+  // 내 카드 오른쪽 위: 공개 중(누르면 비공개로) / 비공개 중. 임시저장도 비공개로 보여 줌
+  const isPublic = post.status === 'published';
+  const stateHtml = blank
+    ? `<span class="ml-auto px-2.5 py-1 rounded-lg bg-slate-400 text-white text-xs font-bold">📝 작성 전</span>`
+    : `<button onclick="event.stopPropagation(); archiveMyPost()" class="ml-auto px-2.5 py-1 rounded-lg ${isPublic ? 'bg-red-600 hover:bg-red-700' : 'bg-slate-500 hover:bg-slate-600'} text-white text-xs font-bold shadow-sm transition">${isPublic ? '🌐 공개 중' : '🔒 비공개 중'}</button>`;
+  const open = blank ? 'openMyCardModal()' : `openViewModal('${esc(post.user_id)}')`;
+  // 값이 비어 있으면 그 칸은 안 보여 줌
+  const chip = (v, cls) => v ? `<span class="${cls}">${esc(v)}</span>` : '';
+  return `
+    <div data-uid="${esc(post.user_id)}" onclick="${open}" class="${sameCond ? 'bg-rose-50/50' : 'bg-white'} ${mine ? 'border-transparent' : sameCond ? 'border-red-200 hover:border-red-300' : 'border-slate-200 hover:border-red-300'} p-5 rounded-2xl border cursor-pointer shadow-sm hover:shadow-md transition space-y-2.5">
+      <!-- 1단: 성별 & 거주기간 (붉은색 강조 태그) + 매칭률 -->
       <div class="flex items-center gap-1.5 text-xs font-bold">
-        <span class="px-2.5 py-1 bg-red-100 text-red-600 rounded-md border border-red-200">${post.gender || "남성"}</span>
-        <span class="px-2.5 py-1 bg-red-50 text-red-600 rounded-md border border-red-100">${post.dormPeriod || "한 학기"}</span>
+        ${chip(post.gender, 'px-2.5 py-1 bg-red-100 text-red-600 rounded-md border border-red-200')}
+        ${chip(post.dorm_period, 'px-2.5 py-1 bg-red-50 text-red-600 rounded-md border border-red-100')}
+        ${mine ? stateHtml : match ? matchBadgeHtml(match) : ''}
       </div>
 
       <!-- 2단: 게시글 제목 (크게) -->
-      <h3 class="font-black text-slate-800 text-lg leading-snug pt-0.5">${post.title || "룸메이트 구해요"}</h3>
+      <h3 class="font-black ${blank ? 'text-slate-300' : 'text-slate-800'} text-lg leading-snug pt-0.5">${esc(post.title)}</h3>
 
       <!-- 3단: 학과 & 학번 & 나이(출생년도) -->
       <div class="flex flex-wrap items-center gap-1.5 text-xs font-medium text-slate-600 pt-1 border-t border-slate-100">
-        <span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700 font-semibold">${post.dept || "전자공학과"}</span>
-        <span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700">${post.studentId || "24학번"}</span>
-        <span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700">${post.birthYear || "2005년생"}</span>
+        ${post.dept ? `<span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700 font-semibold">${esc(post.dept)}</span>` : ''}
+        ${post.student_id ? `<span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700">${esc(post.student_id)}학번</span>` : ''}
+        ${post.birth_year ? `<span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700">${esc(post.birth_year)}년생</span>` : ''}
+        ${mine && !blank ? `<span class="ml-auto"><button onclick="event.stopPropagation(); removeMyPost()" class="text-slate-400 hover:text-red-600 underline">🗑️ 내 글 삭제</button></span>` : ''}
       </div>
-    `;
-    cardContainer.appendChild(card);
-  });
+    </div>`;
+}
+
+function showListMessage(text) {
+  document.getElementById('card-list-container').innerHTML =
+    `<p class="text-center text-sm text-slate-400 py-10">${text}</p>`;
+}
+
+const bannerHtml = (html, action = '') =>
+  `<div class="bg-red-50 border border-red-100 text-red-700 text-xs font-semibold rounded-xl px-4 py-3 leading-relaxed">${html}${action}</div>`;
+
+// 정렬 버튼 표시 갱신 (관련순은 내 글이 있을 때만 사용 가능)
+function updateSortButtons() {
+  const matched = listState?.mode === 'matched';
+  const active = 'text-red-600 font-bold', idle = 'hover:text-slate-800';
+  const on = matched ? sortMode : 'latest';
+  const latest = document.getElementById('sort-latest'), match = document.getElementById('sort-match');
+  document.getElementById('ai-open-btn')?.classList.toggle('hidden', !matched);
+  if (!latest || !match) return;
+  latest.className = on === 'latest' ? active : idle;
+  match.className = (on === 'match' ? active : idle) + (matched ? '' : ' opacity-40 cursor-not-allowed');
+  match.title = matched ? '' : '내 정보를 작성하면 관련도 순으로 볼 수 있어요';
+}
+
+function setSort(mode) {
+  if (mode === 'match' && listState?.mode !== 'matched') return;
+  sortMode = mode;
+  renderList();
+}
+
+// 이미 불러온 데이터로 목록을 그림 (정렬 버튼을 눌러도 DB를 다시 부르지 않음)
+function renderList() {
+  const box = document.getElementById('card-list-container');
+  const mineBox = document.getElementById('my-post-container');
+  if (!box || !mineBox || !listState) return;
+  updateSortButtons();
+  const openBtn = '<button onclick="openProfileEdit()" class="ml-1 underline">내 정보 작성하기</button>';
+  const loginBtn = '<button onclick="openAuthModal(\'login\')" class="ml-1 underline">로그인하기</button>';
+
+  // 내 글은 필터 줄 아래 별도 칸에 표시 (목록에는 넣지 않음)
+  // 카드가 없으면 빈 내 매칭카드 모양을 띄우고, 그 아래 빨간 박스로 안내
+  const blankPost = { user_id: currentUser?.id, status: 'draft', blank: true, title: '아직 작성한 카드가 없어요', gender: '', dorm_period: '', dept: '', student_id: '', birth_year: '' };
+  mineBox.innerHTML = myPost ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="khu-grad-border">${cardHtml(myPost)}</div>`
+    : currentUser ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="khu-grad-border">${cardHtml(blankPost)}</div><div class="mt-2">${bannerHtml('내 매칭카드를 완성하고 게시하여 매칭에 참여하세요.', openBtn)}</div>` : '';
+
+  const parts = [];
+  if (listState.mode === 'matched') {
+    let rows, text;
+    if (sortMode === 'latest') {
+      // 최신순: 성별·거주 기간과 상관없이 전체 글. 같은 조건인 글에만 매칭률을 붙임
+      const byId = new Map(listState.ranked.map(r => [r.post.user_id, r.match]));
+      rows = listState.browse
+        .filter(p => p.user_id !== currentUser?.id)
+        .map(p => ({ post: p, match: byId.get(p.user_id) ?? null }));
+      text = `전체 매칭 카드 ${rows.length}개를 최근 수정순으로 보여드려요. 같은 성별·거주 기간 글에는 매칭률이 함께 떠요.`;
+    } else {
+      rows = listState.ranked;
+      text = `${esc(myPost.gender)} · ${esc(myPost.dorm_period)} 조건이 같은 룸메이트 ${rows.length}명을 관련도 높은 순으로 보여드려요.`;
+    }
+    parts.push(bannerHtml(`${text} (카드를 누르면 답안을 볼 수 있어요)`));
+    parts.push(...(rows.length
+      ? rows.map(r => cardHtml(r.post, r.match))
+      : ['<p class="text-center text-sm text-slate-400 py-10">아직 같은 조건의 글이 없어요. 조금만 기다려 주세요!</p>']));
+  } else {
+    const msg = listState.mode === 'confirmed' ? '룸메가 확정됐어요. 카드는 목록에서 내려갔고, 하우스룰 탭에서 서로의 카드를 볼 수 있어요.'
+      : listState.mode === 'draft' ? '비공개 상태예요. 게시하기를 눌러야 목록과 매칭에 올라가요.'
+      : listState.mode === 'archived' ? '카드가 비공개 중이에요. 목록과 매칭에서 숨겨져 있어요. 공개 중으로 바꾸면 다시 참여해요.'
+      : listState.mode === 'outdated' ? '질문지가 새로워졌어요. 새 질문에 답하고 다시 게시하면 매칭에 참여할 수 있어요.'
+      : listState.mode === 'guest' ? '로그인하면 같은 성별·같은 거주 기간 룸메이트를 관련도 순으로 볼 수 있어요. (지금은 글만 볼 수 있어요)'
+      : null;   // 카드가 없을 때는 위의 내 매칭 카드 칸이 안내하므로 따로 띄우지 않음
+    if (msg) parts.push(bannerHtml(msg, listState.mode === 'guest' ? loginBtn : openBtn));
+    const others = listState.browse.filter(p => !currentUser || p.user_id !== currentUser.id);
+    parts.push(...(others.length ? others.map(p => cardHtml(p)) : ['<p class="text-center text-sm text-slate-400 py-10">아직 올라온 글이 없어요. 첫 글을 올려 보세요!</p>']));
+  }
+  box.innerHTML = parts.join('');
+}
+
+async function loadPosts() {
+  const box = document.getElementById('card-list-container');
+  if (!box) return;
+  const seq = ++loadSeq;
+  const uid = currentUser?.id ?? null;
+  try {
+    let mine = null, state;
+    if (!uid) {
+      // 로그인 안 한 사용자: 글 목록만 (쪽지 등은 막혀 있음)
+      state = { mode: 'guest', browse: await fetchBrowsePosts() };
+    } else {
+      mine = await fetchMyPost(uid);
+      if (mine && mine.status !== 'published') {
+        // 임시저장·보관 중인 카드: 목록과 매칭에서 빠짐 (내 카드 칸에만 보임). 확정된 룸메가 있으면 확정 상태
+        const confirmed = await fetchAcceptedMatch(uid);
+        const mode = confirmed ? 'confirmed' : mine.status === 'archived' ? 'archived' : 'draft';
+        state = { mode, browse: await fetchBrowsePosts() };
+      } else if (mine && (mine.schema_version ?? 0) >= SCHEMA_VERSION) {
+        // 같은 성별·같은 거주 기간만 DB에서 가져와서(하드 필터) 점수로 정렬
+        const candidates = await fetchCandidates(mine);
+        state = { mode: 'matched', ranked: rankMatches(mine, candidates, SCHEMA_VERSION), browse: await fetchBrowsePosts() };
+      } else {
+        state = { mode: mine ? 'outdated' : 'nopost', browse: await fetchBrowsePosts() };
+      }
+    }
+    if (seq !== loadSeq) return;   // 그 사이 더 새로운 요청이 시작됨
+    myPost = mine; listState = state;
+    renderList();
+  } catch (e) {
+    if (seq !== loadSeq) return;
+    console.error(e);
+    showListMessage('글을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
+  }
 }
 
 // 커스텀 게시 확인 모달 열기/닫기
-function confirmPublish() {
-  const modal = document.getElementById('confirm-modal');
-  if (modal) modal.classList.remove('hidden');
-}
 function closeConfirmModal() {
   const modal = document.getElementById('confirm-modal');
   if (modal) modal.classList.add('hidden');
 }
 
-// 선택된 라디오 값 읽기 (선택이 없으면 기본값 반환)
-function getRadioValue(name, fallback) {
-  const checked = document.querySelector(`input[name="${name}"]:checked`);
-  return checked ? checked.value : fallback;
+// 입력 검사: 문제가 있으면 안내하고 null, 괜찮으면 게시할 값을 돌려줌
+function validateProfile() {
+  const p = collectProfile();   // 기본 프로필 + 설문 전체 (profile-schema.js 기준)
+
+  const missing = findMissing(p);
+  if (missing.length) {
+    showProfileTab(scopeOfField(missing[0].name));   // 빈 항목이 있는 탭으로 이동 (질문 순서상 첫 번째 항목 기준)
+    highlightMissing(missing);
+    const names = missing.slice(0, 4).map(m => m.label).join(', ');
+    khuAlert(`아직 답하지 않은 항목이 ${missing.length}개 있어요.\n(${names}${missing.length > 4 ? ' 외' : ''})`);
+    return null;
+  }
+  const studentId = digits(p.student_id), birthYear = digits(p.birth_year);
+  if (studentId.length !== 2) { khuAlert('학번은 숫자 2자리로 입력해 주세요. (예: 24)'); return null; }
+  if (birthYear.length !== 4 || +birthYear < 1980 || +birthYear > 2019) { khuAlert('출생년도는 1980~2019 사이 숫자 4자리로 입력해 주세요. (예: 2005)'); return null; }
+  return { p, studentId, birthYear };
 }
 
-// 게시하기 최종 실행 (기존 게시글 덮어쓰기 처리)
-function executePublish() {
-  const postTitle = document.getElementById('post-title').value.trim() || "룸메이트 구해요";
-  const deptInput = document.getElementById('dept-search').value.trim() || "전자공학과";
-  const rawStudentId = document.getElementById('student-id').value.trim() || "24";
-  const rawBirthYear = document.getElementById('user-birthyear').value.trim() || "2005";
-  
-  // 선택된 성별
-  const selectedGender = document.querySelector('input[name="gender"]:checked');
-  const genderVal = selectedGender ? selectedGender.value : "남성";
+// 게시하기 버튼: 검사를 통과해야 확인 모달이 열림
+function confirmPublish() {
+  if (!currentUser) return openAuthModal('login');
+  if (!validateProfile()) return;
+  const modal = document.getElementById('confirm-modal');
+  if (modal) modal.classList.remove('hidden');
+}
 
-  // 선택된 거주 기간
-  const selectedDorm = document.querySelector('input[name="dorm_period"]:checked');
-  const dormVal = selectedDorm ? selectedDorm.value : "한 학기";
+// 게시하기: 내 글이 이미 있으면 새 내용으로 덮어쓰기 (사용자당 글 1개)
+let publishing = false;
+async function executePublish() {
+  if (publishing) return;
+  if (!currentUser) { closeConfirmModal(); return openAuthModal('login'); }
 
-  const newPost = {
-    gender: genderVal,
-    dormPeriod: dormVal,
-    dept: deptInput,
-    studentId: rawStudentId.includes("학번") ? rawStudentId : `${rawStudentId}학번`,
-    birthYear: rawBirthYear.includes("년생") ? rawBirthYear : `${rawBirthYear}년생`,
-    title: postTitle,
+  const v = validateProfile();   // 확인 모달이 열려 있는 동안 값이 바뀌었을 수도 있어 한 번 더
+  if (!v) return closeConfirmModal();
+  const { p, studentId, birthYear } = v;
 
-    // 3. 소음 및 환경 (서버 연결을 대비해 키는 snake_case로 저장)
-    noise_sensitivity: getRadioValue('noise_sensitivity', 'medium'),
-    media_style: getRadioValue('media_style', 'earphone'),
-    call_style: getRadioValue('call_style', 'short_quiet'),
-    light_pref: getRadioValue('light_pref', 'dim_ok'),
-    temp_sensitivity: getRadioValue('temp_sensitivity', 'normal')
+  const row = {
+    user_id: currentUser.id,
+    title: document.getElementById('post-title').value.trim().slice(0, 60) || '룸메이트 구해요',
+    gender: p.gender,
+    dorm_period: p.dorm_period,
+    dept: p.dept || '',
+    student_id: studentId,
+    birth_year: birthYear,
+    answers: { ...p, student_id: studentId, birth_year: birthYear },   // 설문 전체 (수정 때 다시 불러옴 / 매칭에 사용)
+    schema_version: SCHEMA_VERSION,
+    status: 'published',   // 게시: 목록과 매칭에 올라감
   };
+  // 룸메가 확정된 동안에는 목록에 다시 올리지 않고 보관 상태로 저장
+  const confirmed = await fetchAcceptedMatch(currentUser.id).catch(() => null);
+  if (confirmed) row.status = 'archived';
 
-  // 요구사항: 기존 게시글을 삭제하고 내 새 글로 대체
-  let posts = [newPost];
-  localStorage.setItem('khumate_posts', JSON.stringify(posts));
+  publishing = true;
+  try {
+    await savePost(row);
+  } catch (e) {
+    console.error(e);
+    publishing = false;
+    closeConfirmModal();
+    return khuAlert('저장에 실패했어요. 로그인 상태와 인터넷 연결을 확인해 주세요.');
+  }
+  publishing = false;
 
-  // 모달 닫기 및 리스트 새로고침
+  clearDraft();   // 게시했으니 임시 저장은 더 필요 없음 (이후엔 게시된 글이 폼에 불러와짐)
   closeConfirmModal();
-  closeProfileEdit();
-  loadDummyCards();
+  closeProfileEdit(true);
+  if (confirmed) showToast('룸메가 확정된 상태라 목록에는 올리지 않고 보관해 두었어요.');
+  await loadPosts();
 }
 
-// 데이터 초기화
-function resetLocalStorageData() {
-  if (confirm("저장된 모든 매칭 프로필 데이터를 초기화하시겠습니까?")) {
-    localStorage.removeItem('khumate_posts');
-    loadDummyCards();
-  }
-}
-
-// ================= 4. 단과대 & 학과 검색 드롭다운 로직 =================
-const colleges = ["공과대학", "소프트웨어융합대학", "경영대학", "예술디자인대학", "자유전공학부"];
-const departmentsList = ["전자공학과", "컴퓨터공학과", "경영학과", "시각디자인학과", "환경조경디자인학과"];
-
-function showCollegeList() {
-  const list = document.getElementById('college-list');
-  if (list) {
-    list.classList.remove('hidden');
-    renderList('college-list', colleges, 'college-search');
-  }
-}
-
-function filterCollegeList() {
-  const searchInput = document.getElementById('college-search');
-  if (!searchInput) return;
-  const keyword = searchInput.value.toLowerCase();
-  const filtered = colleges.filter(item => item.toLowerCase().includes(keyword));
-  renderList('college-list', filtered, 'college-search');
-}
-
-function showDeptList() {
-  const list = document.getElementById('dept-list');
-  if (list) {
-    list.classList.remove('hidden');
-    renderList('dept-list', departmentsList, 'dept-search');
-  }
-}
-
-function filterDeptList() {
-  const searchInput = document.getElementById('dept-search');
-  if (!searchInput) return;
-  const keyword = searchInput.value.toLowerCase();
-  const filtered = departmentsList.filter(item => item.toLowerCase().includes(keyword));
-  renderList('dept-list', filtered, 'dept-search');
-}
-
-function renderList(targetId, items, inputId) {
-  const ul = document.getElementById(targetId);
-  if (!ul) return;
-  
-  ul.innerHTML = "";
-  if (items.length === 0) {
-    ul.innerHTML = `<li class="p-2 text-slate-400 text-center">검색 결과가 없습니다</li>`;
-    return;
-  }
-  items.forEach(item => {
-    const li = document.createElement('li');
-    li.textContent = item;
-    li.className = "p-2 hover:bg-red-50 hover:text-red-600 cursor-pointer border-b border-slate-100 last:border-none";
-    li.onclick = () => {
-      document.getElementById(inputId).value = item;
-      ul.classList.add('hidden');
-    };
-    ul.appendChild(li);
-  });
-}
-
-// ================= 5. 취침/기상 시간(시) 커스텀 드롭다운 로직 =================
-const hoursList = Array.from({length: 24}, (_, i) => String(i).padStart(2, '0'));
-
-function toggleHourDropdown(targetId) {
-  ['sleep-hour-list', 'wake-hour-list'].forEach(id => {
-    if (id !== targetId + '-list') {
-      document.getElementById(id)?.classList.add('hidden');
+// 카드 보관: 데이터는 남기고 목록·매칭에서만 숨김. 다시 보관 해제하면 게시 상태로 돌아감
+// 공개 중 ↔ 비공개 중 (버튼을 누르면 반대 상태로. 각각 팝업으로 확인)
+async function archiveMyPost() {
+  if (!currentUser || !myPost) return;
+  const toPublic = myPost.status !== 'published';
+  if (toPublic) {
+    // 공개로 바꾸려면 모든 항목을 채워야 함 (비어 있으면 어떤 항목인지 알려 주고 막음)
+    const missing = findMissing(myPost.answers || {});
+    if (missing.length) {
+      const names = missing.slice(0, 4).map(m => m.label).join(', ');
+      return khuAlert(`항목을 모두 채워야 공개할 수 있어요.\n아직 비어 있는 항목 ${missing.length}개: ${names}${missing.length > 4 ? ' 외' : ''}\n\n수정하기에서 채운 뒤 다시 눌러 주세요.`);
     }
-  });
-
-  const listId = targetId + '-list';
-  const ul = document.getElementById(listId);
-  if (!ul) return;
-
-  const isHidden = ul.classList.contains('hidden');
-  if (isHidden) {
-    ul.classList.remove('hidden');
-    renderHourList(listId, hoursList, targetId);
+    if (await fetchAcceptedMatch(currentUser.id).catch(() => null)) {
+      return khuAlert('룸메가 확정된 동안에는 공개로 바꿀 수 없어요. 하우스룰 탭에서 확정을 해제하면 가능해요.');
+    }
+    if (!(await khuConfirm('카드를 공개 상태로 바꿀까요?\n목록과 매칭에 다시 올라가요.', { okText: '공개로' }))) return;
   } else {
-    ul.classList.add('hidden');
+    if (!(await khuConfirm('지금 내용 그대로 비공개 상태로 바꿀까요?\n목록에서만 내려가고, 카드 내용과 룸메 신청은 그대로 남아요.', { okText: '비공개로' }))) return;
   }
+  try { await setPostStatus(currentUser.id, toPublic ? 'published' : 'archived'); }
+  catch (e) { console.error(e); return khuAlert('처리에 실패했어요.'); }
+  showToast(toPublic ? '카드를 공개했어요. 다시 목록에 올라갔어요.' : '카드를 비공개로 바꿨어요. 목록에서는 보이지 않아요.');
+  await loadPosts();
 }
 
-function renderHourList(targetId, items, inputId) {
-  const ul = document.getElementById(targetId);
-  if (!ul) return;
-  
-  ul.innerHTML = "";
-  items.forEach(item => {
-    const li = document.createElement('li');
-    li.textContent = item;
-    li.className = "p-2 hover:bg-red-50 hover:text-red-600 cursor-pointer border-b border-slate-100 last:border-none text-center font-medium";
-    li.onclick = () => {
-      document.getElementById(inputId).value = item;
-      ul.classList.add('hidden');
-    };
-    ul.appendChild(li);
-  });
+async function removeMyPost() {
+  if (!currentUser) return;
+  const confirmed = await fetchAcceptedMatch(currentUser.id).catch(() => null);
+  const msg = '카드와 작성한 내용이 모두 삭제돼요.\n삭제한 글은 되돌릴 수 없어요.' + (confirmed ? '\n확정된 룸메와의 카드 기록은 하우스룰에 남아요.' : '');
+  if (!(await khuConfirm(msg, { okText: '삭제' }))) return;
+  try { await deletePost(currentUser.id); } catch (e) { return khuAlert('삭제에 실패했어요.'); }
+  clearDraft();   // 이 브라우저에 남은 임시 저장도 지워서 수정 화면에 다시 나오지 않게
+  await loadPosts();
 }
 
-// ================= 6. 라디오 박스 전체 강조 제어 =================
-function updateAllRadioBoxes() {
-  document.querySelectorAll('input[type="radio"]').forEach(radio => {
-    const box = radio.closest('.radio-box');
-    if (!box) return;
-    
-    if (radio.checked) {
-      box.classList.remove('border-slate-300', 'bg-white');
-      box.classList.add('border-red-500', 'bg-red-50/50', 'shadow-sm');
-    } else {
-      box.classList.remove('border-red-500', 'bg-red-50/50', 'shadow-sm');
-      box.classList.add('border-slate-300', 'bg-white');
-    }
-  });
-}
+// ================= 5. 다른 사람 글 보기 (읽기 전용 답안) =================
+// 카드를 누르면 DB에서 그 글의 답안을 다시 받아와서, 내 정보 수정 폼과 같은 모양으로 보여줍니다.
+// 모든 입력칸은 비활성화되어 있어서 볼 수만 있고 바꿀 수 없어요.
+async function openViewModal(userId) {
+  let row;
+  try { row = await fetchPostById(userId); }
+  catch (e) { console.error(e); return khuAlert('글을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.'); }
+  if (!row) row = snapshotCache.get(userId);   // 카드를 지웠어도 확정 당시 복사본이 있으면 보여 줌 (matches.js)
+  if (!row) return khuAlert('이미 삭제된 글이에요.');
 
-document.addEventListener('change', (e) => {
-  if (e.target.type === 'radio') {
-    updateAllRadioBoxes();
-  }
+  document.getElementById('view-title').textContent = row.title;
+  document.getElementById('view-meta').textContent =
+    [row.gender, row.dorm_period, row.dept, `${row.student_id}학번`, `${row.birth_year}년생`].filter(Boolean).join(' · ');
+  renderProfileSections(row.answers || {}, 'view-sections');
+
+  // AI 분석 결과가 있으면 답안 위에 보여 줌 (로그인한 사용자만 있음)
+  const ai = currentUser ? aiByUid.get(row.user_id) : null;
+  const aiBox = document.getElementById('view-ai');
+  aiBox.innerHTML = ai ? aiBoxHtml(ai) : '';
+  aiBox.classList.toggle('hidden', !ai);
+  // 내 카드가 있고 남의 카드면 항목별 비교를 같이 보여 줌
+  const cmpBox = document.getElementById('view-compare');
+  const canCompare = !!currentUser && !!myPost && row.user_id !== currentUser.id;
+  cmpBox.innerHTML = canCompare ? compareHtml(myPost.answers || {}, row.answers || {}) : '';
+  cmpBox.classList.toggle('hidden', !canCompare);
+
+  // 쪽지 버튼: 로그인 안 했거나 내 글이면 비활성화 (쪽지 기능 자체는 아직 준비 중)
+  const msgBtn = document.getElementById('view-msg-btn');
+  msgBtn.dataset.peer = row.user_id;
+  msgBtn.dataset.title = row.title || '';
+  // 내 카드면 아래에 수정하기 버튼 (닫기 버튼은 없앰: 위 ✕ 로 닫음)
+  const footer = document.getElementById('view-footer');
+  const isOwn = !!currentUser && row.user_id === currentUser.id;
+  footer.innerHTML = isOwn
+    ? `<button onclick="closeViewModal(); openProfileEdit()" class="w-full py-3 bg-gradient-to-r from-red-600 to-orange-500 hover:shadow-lg text-white font-bold rounded-xl shadow-sm transition">수정하기</button>`
+    : '';
+  footer.classList.toggle('hidden', !isOwn);
+  const own = !!currentUser && row.user_id === currentUser.id;
+  msgBtn.disabled = false;   // 차단하지 않음: 로그인·공개 여부는 누를 때 팝업으로 안내
+  msgBtn.classList.toggle('hidden', own);   // 내 카드에는 쪽지 버튼 자체를 숨김
+  msgBtn.title = '';
+
+  const scope = document.getElementById('view-sections');
+  scope.querySelectorAll('input, select, textarea, button').forEach(el => { el.disabled = true; el.tabIndex = -1; });
+  document.getElementById('view-modal').classList.remove('hidden');
+}
+// 하단 "내 매칭카드" 버튼: 내 카드 모달을 연다 (거기서 수정하기 → 수정창). 카드가 아직 없으면 바로 수정창
+function openMyCardModal() {
+  if (!currentUser) return openProfileEdit();   // 로그인 안내는 수정창 쪽에서 처리
+  if (myPost) return openViewModal(currentUser.id);
+  // 아직 아무것도 안 쓴 경우: 빈 답안을 그대로 채운 모양으로 띄움 (읽기 전용, 수정하기 버튼으로 수정창)
+  document.getElementById('view-title').textContent = '내 매칭 카드';
+  document.getElementById('view-meta').textContent = '';
+  renderProfileSections({}, 'view-sections');
+  document.getElementById('view-ai').classList.add('hidden');
+  document.getElementById('view-msg-btn').classList.add('hidden');
+  const footer = document.getElementById('view-footer');
+  footer.innerHTML = `<button onclick="closeViewModal(); openProfileEdit()" class="w-full py-3 bg-gradient-to-r from-red-600 to-orange-500 hover:shadow-lg text-white font-bold rounded-xl shadow-sm transition">수정하기</button>`;
+  footer.classList.remove('hidden');
+  const scope = document.getElementById('view-sections');
+  scope.querySelectorAll('input, select, textarea, button').forEach(el => { el.disabled = true; el.tabIndex = -1; });
+  document.getElementById('view-modal').classList.remove('hidden');
+}
+// 쪽지 보내기·룸메 신청 전에 내 카드가 공개 중인지 DB에서 다시 확인
+async function requirePublishedCard() {
+  if (!currentUser) return false;
+  let p;
+  try { p = await fetchMyPost(currentUser.id); }
+  catch { showToast('카드 상태를 확인하지 못했어요. 잠시 후 다시 해 주세요.'); return false; }
+  if (p?.status === 'published') return true;
+  await khuAlert('내 매칭 카드를 공개해야 쪽지를 보내고 룸메 신청을 할 수 있어요.\n수정하기에서 카드를 완성한 뒤 공개로 바꿔 주세요.');
+  return false;
+}
+function onMessageClick() {
+  khuAlert('쪽지 기능은 준비 중이에요.');
+}
+// 쪽지 버튼: 답안 보기 창을 닫고 상대와의 대화창을 염 (messages.js)
+async function onNoteClick() {
+  const btn = document.getElementById('view-msg-btn');
+  if (!currentUser) return khuAlert('로그인 후 쪽지를 보낼 수 있어요.');
+  if (!(await requirePublishedCard())) return;   // 내 카드가 공개 중이 아니면 안내 팝업만 띄움
+  closeViewModal();
+  openThread(btn.dataset.peer, btn.dataset.title);
+}
+function closeViewModal() {
+  const modal = document.getElementById('view-modal');
+  if (modal) modal.classList.add('hidden');
+}
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('view-modal').classList.contains('hidden')) closeViewModal();
+  else closeAiModal();
 });
 
-// ================= 7. 외부 클릭 시 모든 드롭다운 닫기 =================
-document.addEventListener('click', (e) => {
-  if (!e.target.closest('#college-search') && !e.target.closest('#college-list')) {
-    document.getElementById('college-list')?.classList.add('hidden');
-  }
-  if (!e.target.closest('#dept-search') && !e.target.closest('#dept-list')) {
-    document.getElementById('dept-list')?.classList.add('hidden');
-  }
+// ================= 5. AI 정밀 분석 (상위 20명, 하이브리드) =================
+// 목록 정렬은 규칙 점수로 전체가 즉시 됩니다. 'AI 정밀 분석' 버튼을 누르면 팝업이 열리고,
+// 상위 20명을 AI가 한 번에 읽어 규칙 점수를 ±10점 보정하고 설명을 붙입니다.
+// 결과는 팝업의 순위 카드로 보여 주고, 같은 쌍은 서버 DB에 저장되어 다시 AI를 부르지 않아요.
+let aiLatest = null;   // 마지막 분석 결과 (최종 점수 순 정렬 전 원본), 아직 없으면 null
+let aiNote = '';       // 마지막 분석의 안내 문구 (예: AI 설정이 없음)
+let aiError = '';      // 마지막 분석 실패 메시지
 
-  ['sleep-hour', 'wake-hour'].forEach(id => {
-    if (!e.target.closest(`#${id}`) && !e.target.closest(`#${id}-list`)) {
-      document.getElementById(`${id}-list`)?.classList.add('hidden');
-    }
-  });
-});
+function openAiModal() {
+  if (!currentUser || listState?.mode !== 'matched') return;
+  renderAiModal();
+  document.getElementById('ai-modal').classList.remove('hidden');
+}
 
-// ================= 8. 페이지 로드 시 초기 실행 =================
-window.onload = function() {
-  loadDummyCards();
-  updateAllRadioBoxes();
-};
+function closeAiModal() {
+  document.getElementById('ai-modal')?.classList.add('hidden');
+}
+
+function renderAiModal() {
+  const info = document.getElementById('ai-modal-info');
+  const btn = document.getElementById('ai-run-btn');
+  const body = document.getElementById('ai-modal-body');
+  if (!info || !btn || !body) return;
+  const n = Math.min(20, listState?.ranked?.length || 0);
+  info.textContent = `같은 성별·거주 기간 관련도 상위 ${n}명 대상`;
+  btn.disabled = aiRunning || n === 0;
+  btn.textContent = aiRunning ? '분석 중…' : aiLatest ? '🔄 다시 분석' : '▶ 분석 시작';
+  body.innerHTML = aiBodyHtml(n);
+}
+
+function aiBodyHtml(n) {
+  if (aiRunning) {
+    return `
+      <div class="text-center py-14">
+        <div class="text-4xl animate-pulse">🤖</div>
+        <p class="text-sm font-bold text-slate-700 mt-3">AI가 상위 ${n}명의 답안을 읽고 있어요</p>
+        <p class="text-xs text-slate-400 mt-1">보통 20~60초 걸려요. 창을 닫아도 분석은 계속돼요.</p>
+      </div>`;
+  }
+  if (aiError) {
+    return `<div class="bg-rose-50 border border-rose-100 text-rose-700 text-sm font-semibold rounded-xl p-4">${esc(aiError)}</div>`;
+  }
+  if (!aiLatest) {
+    return `
+      <div class="bg-gradient-to-br from-red-50 to-orange-50 border border-red-100 rounded-2xl p-5 space-y-2 text-sm text-slate-700 leading-relaxed">
+        <p class="font-black text-slate-800">이렇게 분석해요</p>
+        <p>① 규칙 점수가 높은 상위 ${n}명을 골라요.</p>
+        <p>② AI가 답안을 함께 읽고 점수를 ±10점 보정해요.</p>
+        <p>③ 잘 맞는 점과 확인할 점을 한 줄씩 설명해요.</p>
+        <p class="text-xs text-slate-400 pt-1">분석 결과는 저장되어서 같은 사람은 다음에 바로 나와요. 1시간에 10번까지 누를 수 있어요.</p>
+      </div>`;
+  }
+  if (!aiLatest.length) {
+    return `<p class="text-center text-sm text-slate-400 py-10">${esc(aiNote || '분석할 후보가 아직 없어요.')}</p>`;
+  }
+  const note = aiNote ? `<p class="text-xs font-semibold text-amber-600 bg-amber-50 rounded-lg px-3 py-2">${esc(aiNote)}</p>` : '';
+  return `${note}<p class="text-xs font-bold text-slate-500">AI 최종 점수 순 · ${aiLatest.length}명</p>` +
+    aiLatest.map((r, i) => aiCardHtml(r, i + 1)).join('');
+}
+
+// AI 결과 카드 (순위 · 최종 점수 · 설명 · 잘 맞는 점 · 확인할 점). 누르면 답안 보기
+function aiCardHtml(r, rank) {
+  const post = listState?.ranked?.find(x => x.post.user_id === r.user_id)?.post;
+  if (!post) return '';
+  const medal = ['from-amber-300 to-yellow-500', 'from-slate-300 to-slate-400', 'from-orange-300 to-orange-500'][rank - 1];
+  const badge = medal ? `bg-gradient-to-br ${medal} text-white shadow` : 'bg-slate-100 text-slate-500';
+  const tone = r.final >= 80 ? 'text-red-600' : r.final >= 60 ? 'text-orange-500' : 'text-slate-500';
+  const adj = r.adjust > 0 ? `+${r.adjust}` : `${r.adjust}`;
+  const adjTone = r.adjust > 0 ? 'text-emerald-600' : r.adjust < 0 ? 'text-rose-500' : 'text-slate-400';
+  const meta = [post.dept, `${post.student_id}학번`, `${post.birth_year}년생`].filter(Boolean).map(esc).join(' · ');
+  const good = (r.good || []).map(g => `<span class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-100">✔ ${esc(g)}</span>`).join('');
+  const warn = (r.warn || []).map(w => `<span class="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[11px] font-bold border border-amber-100">⚠ ${esc(w)}</span>`).join('');
+  return `
+    <div onclick="openViewModal('${esc(r.user_id)}')" class="cursor-pointer bg-white rounded-2xl border ${rank <= 3 ? 'border-red-200' : 'border-slate-200'} p-4 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition space-y-3">
+      <div class="flex items-start gap-3">
+        <div class="w-9 h-9 rounded-xl ${badge} flex items-center justify-center text-sm font-black shrink-0">${rank}</div>
+        <div class="min-w-0 flex-1">
+          <h4 class="font-black text-slate-800 truncate">${esc(post.title)}</h4>
+          <p class="text-[11px] text-slate-500 font-semibold truncate">${meta}</p>
+        </div>
+        <div class="text-right shrink-0">
+          <p class="text-2xl font-black ${tone} leading-none">${r.final}<span class="text-xs font-bold text-slate-400">점</span></p>
+          <p class="text-[10px] font-bold ${adjTone} mt-1">규칙 ${r.rule_score} ${adj}</p>
+        </div>
+      </div>
+      <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
+        <div class="h-full bg-gradient-to-r from-red-500 to-orange-400 rounded-full" style="width:${r.final}%"></div>
+      </div>
+      <p class="text-sm text-slate-700 leading-relaxed">${esc(r.summary)}</p>
+      ${good || warn ? `<div class="flex flex-wrap gap-1.5">${good}${warn}</div>` : ''}
+      <p class="text-xs font-bold text-red-600 text-right">답안 보기 →</p>
+    </div>`;
+}
+
+async function runAiMatch() {
+  if (aiRunning || !currentUser) return;
+  aiRunning = true;
+  aiError = '';
+  renderAiModal();
+  try {
+    const { data } = await sb.auth.getSession();
+    if (!data.session) throw new Error('로그인이 만료됐어요. 다시 로그인해 주세요.');
+    const res = await fetch('/api/match-ai', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${data.session.access_token}`, 'Content-Type': 'application/json' },
+      body: '{}',
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || 'AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.');
+    applyAiResults(json.results || [], json.warning || '');
+  } catch (e) {
+    console.error(e);
+    aiError = e.message || 'AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.';
+  } finally {
+    aiRunning = false;
+    renderAiModal();
+  }
+}
+
+// 분석 결과 저장: 팝업은 최종 점수 순으로 그리고, 답안 보기 창에서도 쓸 수 있게 사람별로도 보관
+// 목록 순서는 바꾸지 않음 (목록은 규칙 점수 기준으로 항상 즉시 정렬)
+function applyAiResults(results, warning) {
+  aiLatest = results.slice().sort((x, y) => y.final - x.final || y.rule_score - x.rule_score);
+  aiNote = warning;
+  results.forEach(r => aiByUid.set(r.user_id, r));
+}
+
+// 답의 값을 사람이 읽는 말로 (선택지는 라벨, 범위는 a~b)
+function valueText(key, v) {
+  if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)) return '미응답';
+  const f = allFields().find(x => x.name === key);
+  const lab = x => f?.options?.find(op => String(op.value) === String(x))?.label ?? String(x);
+  if (Array.isArray(v)) return v.map(lab).join(', ');
+  if (typeof v === 'object') return v.from !== undefined ? `${v.from}~${v.to}` : `${v.lo}~${v.hi}`;
+  return lab(v);
+}
+// 정밀 분석 창: 내 카드와 항목별로 비교 (내 허용 범위 안인지, 상대 허용 범위 안인지, 점수)
+function compareHtml(mine, theirs) {
+  const rows = matchBreakdown(mine, theirs);
+  if (!rows.length) return '<p class="text-xs text-slate-400">비교할 항목이 부족해요.</p>';
+  const ms = matchScore(mine, theirs);
+  const tone = t => t.startsWith('범위 안') ? 'text-emerald-600 font-bold' : t.startsWith('범위 밖') ? 'text-amber-600 font-bold' : 'text-slate-400';
+  return `
+    <div class="rounded-xl border border-slate-200 bg-white p-4 text-xs leading-relaxed space-y-2">
+      <p class="font-bold text-slate-800">🔍 내 카드와 비교 <span class="font-normal text-slate-500">${ms ? `· 규칙 점수 ${ms.score}점` : ''}</span></p>
+      ${rows.map(r => `
+        <div class="py-2 border-b border-slate-100 last:border-none space-y-0.5">
+          <p class="font-bold text-slate-700">${esc(r.label)} <span class="font-semibold text-red-600">${r.score}점</span></p>
+          <p class="text-slate-600">나: ${esc(valueText(r.key, r.mine))} · 상대: ${esc(valueText(r.key, r.theirs))}</p>
+          <p><span class="text-slate-500">내 허용:</span> <span class="${tone(r.mineRange)}">${esc(r.mineRange)}</span> · <span class="text-slate-500">상대 허용:</span> <span class="${tone(r.theirsRange)}">${esc(r.theirsRange)}</span></p>
+        </div>`).join('')}
+    </div>`;
+}
+
+function aiBoxHtml(ai) {
+  const adj = ai.adjust > 0 ? `+${ai.adjust}` : `${ai.adjust}`;
+  return `
+    <div class="bg-red-50/60 border border-red-100 text-slate-700 rounded-xl p-4 text-xs leading-relaxed space-y-2">
+      <p class="font-bold text-red-600">🤖 AI 분석 <span class="font-normal text-slate-500">· 규칙 ${ai.rule_score}점 → AI 보정 ${adj} → 최종 ${ai.final}점</span></p>
+      <p>${esc(ai.summary)}</p>
+      ${ai.good?.length ? `<p><span class="text-emerald-600 font-bold">✔ 잘 맞는 점</span> ${ai.good.map(esc).join(' · ')}</p>` : ''}
+      ${ai.warn?.length ? `<p><span class="text-amber-600 font-bold">⚠ 확인해 보세요</span> ${ai.warn.map(esc).join(' · ')}</p>` : ''}
+    </div>`;
+}
+
+// ================= 4. 초기 실행 =================
+// 질문을 추가했는데 매칭 규칙(matching.js)에 없으면 콘솔에서 알려 줌
+checkMatchCoverage(PROFILE_SCHEMA.filter(s => sectionScope(s) === 'me'));   // 원하는 룸메(rm_) 질문은 매칭 규칙을 따로 만들 예정
+
+// auth.js 가 로그인 상태를 알려 주는 시점이 이 파일이 로드되기보다 빠르면 놓칠 수 있으므로,
+// 시작할 때 현재 세션을 한 번 직접 확인 (같은 사용자면 onAuthChanged 가 중복 로딩을 막아 줌)
+sb.auth.getSession().then(({ data }) => onAuthChanged(data.session));
