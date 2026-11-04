@@ -1,804 +1,393 @@
-// ================= 1. 탭 전환 기능 =================
-function switchTab(tabName) {
-  if (tabName === 'chatting') setTimeout(renderInbox, 0);   // 메시지함 탭을 열면 최신 목록
-  if (tabName === 'houserule') setTimeout(renderHouseRule, 0);   // 하우스룰: 확정된 룸메의 카드 (matches.js)
-  const tabs = ['matching', 'chatting', 'houserule'];
-  
-  tabs.forEach(t => {
-    const btn = document.getElementById(`tab-${t}`);
-    const content = document.getElementById(`content-${t}`);
-    
-    if (btn && content) {
-      if (t === tabName) {
-        btn.className = "flex-1 py-3 text-sm font-bold text-red-600 border-b-2 border-red-600 transition";
-        content.classList.remove('hidden');
-      } else {
-        btn.className = "flex-1 py-3 text-sm font-semibold text-slate-400 hover:text-slate-600 transition";
-        content.classList.add('hidden');
-      }
-    }
-  });
+// ================= 내 정보 수정 모달 - 항목 정의 =================
+// 항목을 추가/수정/삭제할 때는 이 파일만 고치면 됩니다. (화면 렌더링은 profile-form.js)
+//
+// ■ 단일 항목: { name, label, type, default?, hint?, half? }
+//   radio    : options[{value,label,desc?}], cols?   (desc 있으면 세로 목록)
+//   checkbox : options[{value,label}], cols?, default: []   → 배열로 저장
+//   range    : min, max, ends[왼쪽, 가운데, 오른쪽]            → 숫자로 저장
+//   select   : options[{value,label}]                          → 드롭다운 (단과대 서식)
+//   combo    : options[{value,label}]                          → 검색 + 직접 입력 가능한 드롭다운
+//   time     : 시 : 분 한 박스 드롭다운, 'HH:MM' 문자열로 저장
+//   number   : suffix?(오른쪽 단위), placeholder?
+//   text     : placeholder?, maxLength?
+//   placeholder : 추후 구현 자리(저장 안 함)
+//   half: true → 절반 너비
+//
+// ■ 기본값(default)은 쓰지 않습니다. 매칭에서 "답한 것"과 "기본값 그대로"를 구분할 수 없기 때문입니다.
+//   모든 항목은 필수이고, 비워도 되는 항목만 optional: true 를 붙입니다. (checkbox 는 1개 이상 선택)
+//
+// ■ 묶음 항목 (큰 라벨 아래 소라벨로 나뉨):
+//   { type:'group', label, fields:[{ sublabel, name, type, ... }, ...], grid? }
+//   grid: 칸 비율 (예: 'grid-cols-[1.5fr_1fr]'), 생략하면 동일 비율
+//
+
+// 질문지 버전: 질문을 추가/삭제/변경하면 올리세요. 매칭은 현재 버전으로 답한 글끼리만 비교합니다.
+// (DB의 roommate_posts.schema_version 에 저장됨)
+const SCHEMA_VERSION = 14;   // v14: 온도 민감도 눈금 왼쪽을 '추위'로 바꿈 (값 1=추위 많이 탐, 5=더위 많이 탐). 예전 글은 다시 게시해야 매칭에 참여. v13: 청소·쓰레기 주기 슬라이더(선택지 밑), 쓰레기통 공유·당번제 O/X, 분리수거·친구 초대·공용 물품 삭제, 냉장고·행거 공구/공유 의사, 기타→사생활 통합. v12: 청소 방식(빈도 조건부)·당번제/쓰레기통 공유, 쓰레기 빈도·분리수거 조건부, 룸메 요일·샤워 선택지 정리. v11: 민감도·대인관계 룸메 슬라이더를 가운데에서 시작하는 범위 슬라이더로. v10: 민감도 룸메 범위를 절대 1~5 범위 슬라이더(나의 성향과 같은 눈금)로. v9: 기상 알람 3가지(없음·무음/한 번에/여러 번)·룸메 허용 범위, 민감도 3종 룸메 범위 슬라이더. v8: 허용 범위 질문은 가장 넓은 단계를 글로 씀 (상관없음 없음). v7: 허용 범위 질문 11개 단일 선택. v6: 조명 허용 범위. v5: 흡연 본인 하나, 외부인 숙박 삭제, 냄새 민감도 위치, 룸메 복수 선택·시간 범위
+
+const o = (value, label, desc) => ({ value, label, desc });
+const list = arr => arr.map(v => o(v, v));
+// 하위 질문: 부모 질문(parentName)에서 value 를 골랐을 때 그 선택지 바로 밑에 열림 (group 안에서 사용)
+const under = (parentName, value, f) => ({ ...f, under: true, when: { name: parentName, value } });
+// 주기 슬라이더 눈금 (값은 0부터의 단계 번호: 0 격주 · 1 주 1회 · 2 주 2-3회 · 3 격일)
+const FREQ_TICKS = ['격주', '주 1회', '주 2-3회', '격일'];
+
+// 취미 추천 목록 (카테고리별. 드롭다운에서 카테고리를 펼쳐서 고름. 목록에 없는 취미는 직접 입력해서 추가 가능)
+const HOBBY_GROUPS = [
+  { name: '운동·스포츠', items: ['러닝', '헬스', '필라테스', '요가', '수영', '클라이밍', '자전거', '등산', '산책', '배드민턴', '테니스', '탁구', '볼링', '축구', '농구', '야구', '골프', '스케이트', '복싱', '댄스'] },
+  { name: '문화·예술', items: ['영화', '드라마', '웹툰', '애니메이션', '전시회', '공연', '뮤지컬', '콘서트', '음악 감상', '악기 연주', '노래', '그림', '사진', '글쓰기', '캘리그라피', '공예'] },
+  { name: '게임·IT', items: ['PC 게임', '모바일 게임', '콘솔 게임', '보드게임', '코딩', '영상 편집', '3D 모델링', '유튜브', 'e스포츠 관람'] },
+  { name: '음식·카페', items: ['요리', '베이킹', '맛집 탐방', '카페 투어', '디저트', '커피', '차 마시기', '와인', '술 한잔'] },
+  { name: '여행·아웃도어', items: ['국내 여행', '해외 여행', '캠핑', '드라이브', '낚시', '피크닉', '당일치기'] },
+  { name: '일상·취향', items: ['독서', '쇼핑', '패션', '뷰티', '인테리어', '식물 가꾸기', '반려동물', '청소·정리', '수면', '명상', '봉사활동', '덕질'] },
+  { name: '공부·자기계발', items: ['공부', '외국어', '자격증', '재테크', '스터디', '독서 모임', '일기 쓰기'] },
+  { name: '사람·모임', items: ['친구 만나기', '동아리', '모임 활동', '혼자만의 시간', '수다', '홈파티'] },
+];
+const HOBBY_OPTIONS = HOBBY_GROUPS.flatMap(g => g.items.map(v => ({ value: v, label: v, group: g.name })));
+
+// 단과대·학과 목록 (나의 성향 드롭다운 / 원하는 룸메 중복 선택에서 같이 씀)
+// 단과대 → 소속 학과 (단과대를 고르면 그 단과대 학과만 학과 목록에 보임)
+const DEPT_MAP = {
+  '공과대학': ['기계공학부', '산업경영공학과', '원자력공학과', '화학공학과', '신소재공학과', '사회기반시스템공학과', '건축공학과', '환경학 및 환경공학과', '건축학과'],
+  '전자정보대학': ['전자공학과', '반도체공학과', '생체의공학과'],
+  '소프트웨어융합대학': ['컴퓨터공학과', '인공지능학과', '소프트웨어융합학과'],
+  '응용과학대학': ['응용수학과', '응용물리학과', '응용화학과', '우주과학과'],
+  '생명과학대학': ['유전생명공학과', '식품생명공학과', '융합바이오·신소재공학과', '스마트팜과학과'],
+  '국제대학': ['국제학과', '아시아학과'],
+  '외국어대학': ['프랑스어학과', '스페인어학과', '러시아어학과', '중국어학과', '일본어학과', '한국어학과', '글로벌커뮤니케이션학부'],
+  '예술·디자인대학': ['도예학과', '산업디자인학과', '시각디자인학과', '환경조경디자인학과', '디지털콘텐츠학과', '의류디자인학과', '연극영화학과', 'PostModern음악학과'],
+  '체육대학': ['체육학과', '스포츠지도학과', '스포츠의학과', '골프산업학과', '태권도학과'],
+  '자유전공학부': ['자유전공학부'],
+};
+const COLLEGES = Object.keys(DEPT_MAP);
+// 학과 선택지: group = 소속 단과대 (드롭다운 필터에 씀)
+const DEPT_OPTIONS = Object.entries(DEPT_MAP).flatMap(([c, ds]) => ds.map(d => ({ value: d, label: d, group: c })));
+// 학번·나이 범위 눈금: 가운데(0)가 내 값
+// 학번: 왼쪽이 +3 (숫자가 큰 쪽) → '+3학번 이하', 오른쪽 끝 '-3학번 이상' (거울 배치 flip)
+const SPAN_TICKS_ID = ['-3학번 이상', '-2학번', '-1학번', '내 값', '+1학번', '+2학번', '+3학번 이하'];
+// 나이: 내 값이 없을 땐 '살'(나이 차이)이라 왼쪽이 -3살 이하, 오른쪽이 +3살 이상 (거울 배치 flip).
+// 내 값이 있으면 년생 숫자로 바뀌며 왼쪽이 가장 큰 년생(어림)·'이하'
+const SPAN_TICKS_AGE = ['+3살 이상', '+2살', '+1살', '내 값', '-1살', '-2살', '-3살 이하'];   // 배열 순서 = 값 -3 → +3
+
+const PROFILE_SCHEMA = [
+  {
+    id: 'basic',
+    title: '기본 정보',
+    fields: [
+      { name: 'gender', label: '성별', type: 'radio', cols: 2, options: list(['남성', '여성']) },
+      { name: 'dorm_period', label: '기숙사 거주 기간', type: 'radio', cols: 3, options: list(['한 학기', '반년', '연간(1년)']) },
+      { name: 'college', label: '단과대학', type: 'combo', half: true, optional: true, placeholder: '단과대 검색', 
+        options: list(COLLEGES) },
+      { name: 'dept', label: '학과', type: 'combo', half: true, placeholder: '학과 검색', 
+        dependsOn: 'college', options: DEPT_OPTIONS },
+      { name: 'student_id', label: '학번 (숫자 2자리)', type: 'number', half: true, digits: 2, placeholder: '예: 24', suffix: '학번' },
+      { name: 'birth_year', label: '나이 (출생년도 4자리)', type: 'number', half: true, digits: 4, placeholder: '예: 2005', suffix: '년' },
+    ],
+  },
+  {
+    id: 'lifestyle',
+    title: '생활 패턴',
+    fields: [
+      {
+        type: 'group', label: '수면 시간',
+        fields: [
+          { name: 'wake_time',  sublabel: '기상', type: 'time', span: [5, 12] },
+          { name: 'sleep_time', sublabel: '취침', type: 'time', span: [21, 4] },
+        ],
+      },
+      {
+        name: 'room_stay', label: '방에 머무는 정도 (재실율)', type: 'radio', 
+        options: [
+          o('high', '방콕형', '수업 시간 외 대부분 방에 있음'),
+          o('medium', '반반형', '적당히 외출하고 적당히 들어옴'),
+          o('low', '외출형', '도서관/약속 등으로 주로 밖에 있음'),
+        ],
+      },
+      {
+        name: 'stay_days', label: '주로 상주하는 요일 (중복 선택)', type: 'checkbox', cols: 7, default: [],
+        options: list(['월', '화', '수', '목', '금', '토', '일']),
+        hint: '기숙사 방에 주로 머무르는 요일을 모두 골라 주세요.',
+      },
+      {
+        type: 'group', label: '샤워', grid: 'grid-cols-[1.5fr_1fr]',
+        fields: [
+          { name: 'shower_time', sublabel: '시간대 (중복 선택)', type: 'checkbox', cols: 3, default: [],
+            options: [o('morning', '아침'), o('evening', '저녁')] },
+          { name: 'shower_duration', sublabel: '소요 시간', type: 'select', placeholder: '선택',
+            options: [o('5', '5분 이내'), o('10', '10분'), o('15', '15분'), o('20', '20분'), o('30', '30분'), o('40', '40분 이상')] },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'noise_env',
+    title: '소음 및 환경',
+    fields: [
+      {
+        name: 'noise_sensitivity', label: '소음 민감도', type: 'range', min: 1, max: 5, 
+        ends: ['둔감', '보통', '예민'],
+        steps: ['많이 둔감', '둔감', '보통', '예민', '많이 예민'],
+        hint: "잠귀가 밝거나 작은 소리에도 집중이 깨지면 '예민' 쪽으로 옮겨 주세요.",
+      },
+      {
+        name: 'snoring', label: '코골이·이갈이', type: 'radio', cols: 3,
+        options: [o('none', '없음'), o('sometimes', '가끔'), o('often', '자주')],
+      },
+      {
+        name: 'alarm_style', label: '기상 알람', type: 'radio', cols: 3,
+        options: [o('silent', '없음·무음'), o('once', '한 번에 기상'), o('multi', '여러 번 맞춤')],
+      },
+      {
+        name: 'media_style', label: '음악·영상 시청 방식', type: 'radio', 
+        options: [
+          o('earphone', '이어폰·헤드폰', '항상 개인 기기로만 들어요'),
+          o('speaker_low', '작은 스피커', '낮에는 작게 틀 수 있어요'),
+          o('speaker_free', '스피커 자유', '룸메이트가 괜찮다면 편하게 틀어요'),
+        ],
+      },
+      {
+        name: 'call_style', label: '통화', type: 'radio', 
+        options: [
+          o('outside', '밖에서 통화', '복도·라운지에서 받아요'),
+          o('short_quiet', '짧게·조용히', '방에서 하되 짧고 작게 해요'),
+          o('free', '방에서 자유롭게', '통화·화상 통화가 잦아요'),
+        ],
+      },
+      {
+        name: 'light_pref', label: '조명 (취침 시간대)', type: 'radio', 
+        options: [
+          o('dark', '완전 소등', '불빛이 조금이라도 있으면 잠들기 어려워요'),
+          o('dim_ok', '은은한 조명', '스탠드나 책상등 정도를 켜요'),
+          o('bright_ok', '완전 점등', '불을 켜고 자는 편이에요'),
+        ],
+      },
+      {
+        name: 'temp_sensitivity', label: '온도 민감도', type: 'range', min: 1, max: 5, 
+        ends: ['추위 많이 탐', '보통', '더위 많이 탐'],
+        steps: ['추위 많이 탐', '추위 탐', '보통', '더위 탐', '더위 많이 탐'],
+        hint: '냉난방 세기와 환기, 이불 두께 같은 취향을 맞출 때 참고돼요.',
+      },
+    ],
+  },
+  {
+    id: 'cleanliness',
+    title: '청결 및 정리',
+    fields: [
+      // 큰 카테고리 '공용 공간 청소' 아래 소주제 (샤워와 같은 서식). 주기는 선택지 바로 밑에 열림
+      {
+        type: 'group', label: '공용 공간 청소', grid: 'grid-cols-1',
+        fields: [
+          { name: 'clean_style', sublabel: '청소 방식', type: 'radio', list: true,
+            options: [o('as_needed', '필요할 때 청소', '더러워 졌을 때만 해요'), o('often', '주기적으로 청소', '주기적으로 청소해요'), o('daily', '바로바로 청소', '항상 깔끔하게 유지해요')] },
+          under('clean_style', 'often', { name: 'clean_freq', sublabel: '청소 주기', type: 'range', ticks: FREQ_TICKS }),
+          { name: 'rotation', sublabel: '당번제', type: 'checkbox', cols: 2, default: [],
+            options: [o('ordered', 'O', '순서대로'), o('free', 'X', '각자 알아서')] },
+        ],
+      },
+      {
+        name: 'tidy_level', label: '개인 공간 정리', type: 'radio', 
+        options: [
+          o('relaxed', '편하게', '물건이 나와 있어도 크게 신경 쓰지 않아요'),
+          o('normal', '적당히', '어느 정도 어질러져도 주기적으로 치워요'),
+          o('neat', '항상 정돈', '책상·침대 주변을 늘 깔끔하게 유지해요'),
+        ],
+      },
+      // 큰 카테고리 '쓰레기 처리' 아래 소주제
+      {
+        type: 'group', label: '쓰레기 처리', grid: 'grid-cols-1',
+        fields: [
+          { name: 'trash_style', sublabel: '처리 방식', type: 'radio', list: true,
+            options: [o('full', '다 찼을 때 비움', '쓰레기가 다 찼을 때만 비워요'), o('regular', '모아서 주기적으로', '일정 주기로 모아서 비워요'), o('immediate', '바로바로 비움', '날마다 바로 비워요')] },
+          under('trash_style', 'regular', { name: 'trash_freq', sublabel: '비우는 주기', type: 'range', ticks: FREQ_TICKS }),
+          { name: 'shared_bin', sublabel: '쓰레기통 공유', type: 'checkbox', cols: 2, default: [],
+            options: [o('yes', 'O', '공유함'), o('no', 'X', '공유 안 함')] },
+          { name: 'trash_rotation', sublabel: '쓰레기 당번제', type: 'checkbox', cols: 2, default: [], when: { name: 'shared_bin', value: 'yes' },
+            options: [o('ordered', 'O', '순서대로'), o('free', 'X', '각자 알아서')] },
+        ],
+      },
+      {
+        name: 'smell_sensitivity', label: '냄새 민감도', type: 'range', min: 1, max: 5,
+        ends: ['둔감', '보통', '예민'],
+        steps: ['많이 둔감', '둔감', '보통', '예민', '많이 예민'],
+      },
+      {
+        name: 'ventilation', label: '환기', type: 'radio', 
+        options: [
+          o('rarely', '거의 안 함', '창문을 잘 열지 않는 편이에요'),
+          o('sometimes', '가끔 환기', '하루 한두 번 정도 열어요'),
+          o('often', '자주 환기', '하루에 여러 번 창문을 열어요'),
+        ],
+      },
+      {
+        type: 'group', label: '행거 여부', grid: 'grid-cols-1',
+        fields: [
+          { name: 'hanger', type: 'radio', options: [o('none', '없음'), o('own', '있음')] },
+          under('hanger', 'none', { name: 'hanger_buy', sublabel: '공구 의사', type: 'radio', cols: 2, options: [o('yes', 'O', '있음'), o('no', 'X', '없음')] }),
+          under('hanger', 'own', { name: 'hanger_lend', sublabel: '공유 의사', type: 'radio', cols: 2, options: [o('yes', 'O', '가능'), o('no', 'X', '불가')] }),
+        ],
+      },
+    ],
+  },
+  {
+    id: 'eating',
+    title: '취식',
+    fields: [
+      {
+        name: 'indoor_eating', label: '실내 취식', type: 'radio', 
+        options: [
+          o('none', '안 먹음', '방 안에서는 먹지 않아요'),
+          o('snack', '간식·음료만', '냄새가 약한 간단한 음식만 먹어요'),
+          o('meal', '식사·배달음식', '냄새가 나는 음식도 방에서 먹어요'),
+        ],
+      },
+      {
+        type: 'group', label: '냉장고', grid: 'grid-cols-1',
+        fields: [
+          { name: 'fridge', type: 'radio', options: [o('none', '없음'), o('own', '있음')] },
+          under('fridge', 'none', { name: 'fridge_buy', sublabel: '공구 의사', type: 'radio', cols: 2, options: [o('yes', 'O', '있음'), o('no', 'X', '없음')] }),
+          under('fridge', 'own', { name: 'fridge_lend', sublabel: '공유 의사', type: 'radio', cols: 2, options: [o('yes', 'O', '가능'), o('no', 'X', '불가')] }),
+        ],
+      },
+    ],
+  },
+  {
+    id: 'social',
+    title: '사생활 및 대인관계',
+    fields: [
+      {
+        name: 'roommate_relation', label: '룸메이트와의 선호 관계', type: 'range', min: 1, max: 5, 
+        ends: ['각자 생활', '적당히', '친구처럼'],
+        steps: ['각자 생활', '가벼운 인사', '적당히', '자주 어울림', '친구처럼'],
+      },
+      {
+        name: 'smoking', label: '흡연 여부', type: 'radio', cols: 3,
+        options: [o('none', '비흡연'), o('vape', '전자담배'), o('cigarette', '일반 담배')],
+      },
+      {
+        name: 'drinking', label: '음주 빈도', type: 'radio', cols: 2,
+        options: [o('none', '안 마심'), o('rarely', '월 1~2회'), o('weekly', '주 1~2회'), o('often', '주 3회 이상')],
+      },
+      {
+        name: 'hobby', label: '취미', type: 'tags', optional: true, maxLength: 10, max: 10,
+        placeholder: '검색하거나 직접 입력 후 Enter (최대 10개)', hint: '목록에 없으면 직접 입력해서 추가할 수 있어요. 태그는 하나당 10자 이하.',
+        options: HOBBY_OPTIONS, cats: HOBBY_GROUPS.map(g => g.name), grouped: true, boxed: true, clearable: true,
+      },
+    ],
+  },
+];
+
+// '원하는 룸메' 탭
+// 1) 기본 정보: 성별·거주 기간은 나와 같게 고정, 단과대·학과는 여러 개 고를 수 있고, 학번·나이는 나와의 차이 범위
+// 2) 나머지: 나의 성향 질문을 복제(저장 이름 앞에 rm_). 선택지에는 '상관없음'을 넣고, 일부 질문은 형식을 바꿈
+const RM_BASIC = {
+  id: 'rm_basic', title: '기본 정보', scope: 'roommate',
+  fields: [
+    { name: 'rm_fixed_gender', label: '성별', type: 'fixed', source: 'gender', cols: 2, options: list(['남성', '여성']) },
+    { name: 'rm_fixed_dorm', label: '기숙사 거주 기간', type: 'fixed', source: 'dorm_period', cols: 3, options: list(['한 학기', '반년', '연간(1년)']) },
+    // 단과대는 드롭다운으로만 고르고 저장·태그 표시는 하지 않음 (transient). 고른 단과대의 학과를 학과 칸에서 한꺼번에 넣을 수 있음
+    { type: 'group', label: '단과대·학과 (중복 선택)', grid: 'grid-cols-2', boxed: true,
+      hint: '단과대를 고르면 그 소속 학과를 한꺼번에 넣을 수 있어요. 단과대 선택은 저장되지 않아요.',
+      fields: [
+        { name: 'rm_college', sublabel: '단과대', type: 'combo', optional: true, transient: true, placeholder: '단과대 선택', options: list(COLLEGES) },
+        { name: 'rm_dept', sublabel: '학과', type: 'tags', plain: true, custom: false, max: 999, maxLength: 20, chipsOutside: true, grouped: true, anyDefault: true, optional: true,
+          placeholder: '학과를 검색하거나 골라 주세요', default: [], options: DEPT_OPTIONS },
+      ] },
+    { name: 'rm_student_range', label: '학번 범위 (나와의 차이)', type: 'span', ticks: SPAN_TICKS_ID, flip: true, source: 'student_id', srcDigits: 2 },
+    { name: 'rm_birth_range', label: '나이 범위 (나와의 차이)', type: 'span', ticks: SPAN_TICKS_AGE, flip: true, source: 'birth_year', srcDigits: 4, short: true },
+  ],
+};
+
+// 나의 성향 질문을 룸메 질문으로 바꾸는 규칙
+const RM_OVERRIDE = {
+  wake_time:  { type: 'hourrange', span: [5, 12] },   // 기상 시간 범위: 05시~12시 안에서 고름
+  sleep_time: { type: 'hourrange', span: [21, 4] },   // 취침 시간 범위: 21시~04시 안에서 고름 (자정 넘김)
+  stay_days:  { cols: 2, label: '주로 상주하는 요일', options: [o('weekday', '평일만'), o('weekend', '주말까지')] },   // 중복 선택
+  shower_time: { noAny: true, options: [o('morning', '아침'), o('evening', '저녁')] },   // 불규칙·상관없음 삭제
+  smoking:    { label: '흡연 여부' },
+  hobby:      { type: 'radio', optional: false, cols: 2, options: [o('any', '상관없음'), o('similar', '비슷한 취미')] },
+  // 허용 범위 질문: 룸메가 이 행동을 어디까지 괜찮게 여기는지 한 단계만 고름 (단일 선택, 상관없음 = 가장 넓은 범위)
+  light_pref: { type: 'radio', noAny: true, list: true, label: '조명 허용 범위 (취침 시간대)', options: [
+    o('dark', '완전 소등만 괜찮아요', '룸메이트의 불빛도 없어야 해요'),
+    o('dim_ok', '은은한 조명까지 괜찮아요', '스탠드·책상등 정도는 괜찮아요'),
+    o('bright_ok', '밝아도 괜찮아요', '불이 켜져 있어도 잘 자요'),
+  ] },
+};
+// 허용 범위 질문들 (원하는 룸메): 룸메가 이 행동을 어디까지 괜찮게 여기는지 한 단계 고르기 (단일 선택)
+// 가장 넓은 단계까지 글로 씀 (상관없음으로 뭉뚱그리지 않음). 값은 나의 성향과 같게 유지해서 나중에 매칭에 연결
+const TOLERANCE = {
+  room_stay:     { label: '방에 머무는 정도 허용 범위', opts: [['low', '외출형만 괜찮아요', '주로 밖에 있는 룸메이트'], ['medium', '반반형까지 괜찮아요', '적당히 외출하고 들어오는 룸메이트'], ['high', '방콕형도 괜찮아요', '수업 외 대부분 방에 있어도 괜찮아요']] },
+  media_style:   { label: '음악·영상 소리 허용 범위', opts: [['earphone', '이어폰·헤드폰만 괜찮아요', '스피커 소리는 힘들어요'], ['speaker_low', '작은 스피커까지 괜찮아요', '낮에 작게 트는 정도'], ['speaker_free', '스피커를 자유롭게 틀어도 괜찮아요']] },
+  call_style:    { label: '통화 허용 범위', opts: [['outside', '밖에서 하는 통화만 괜찮아요', '방 안 통화는 힘들어요'], ['short_quiet', '짧고 조용한 통화까지 괜찮아요', '방에서 짧게 하는 정도'], ['free', '방에서 자유롭게 통화해도 괜찮아요']] },
+  snoring:       { label: '코골이·이갈이 허용 범위 [추가]', opts: [['none', '없어야 해요'], ['sometimes', '가끔은 괜찮아요'], ['often', '자주 있어도 괜찮아요']] },
+  clean_style:   { label: '공용 공간 청소 허용 방식', opts: [['as_needed', '필요할 때만 해도 괜찮아요'], ['often', '주기적으로 청소해주세요'], ['daily', '바로바로 청소해주세요']] },
+  trash_style:   { label: '쓰레기 처리 허용 방식', opts: [['full', '다 찼을 때 비워도 괜찮아요'], ['regular', '모아서 주기적으로 비워도 괜찮아요'], ['immediate', '바로바로 비워주세요']] },
+  tidy_level:    { label: '개인 공간 정리 허용 범위', opts: [['relaxed', '물건이 나와 있어도 괜찮아요'], ['normal', '어느 정도 어질러져도 괜찮아요'], ['neat', '항상 정돈된 편만 괜찮아요']] },
+  ventilation:   { label: '환기 허용 범위', opts: [['rarely', '거의 안 해도 괜찮아요'], ['sometimes', '가끔 환기까지 괜찮아요'], ['often', '자주 환기하는 편만 괜찮아요']] },
+  drinking:      { label: '음주 빈도 허용 범위', opts: [['none', '안 마시는 편만 괜찮아요'], ['rarely', '월 1~2회까지 괜찮아요'], ['weekly', '주 1~2회까지 괜찮아요'], ['often', '주 3회 이상 마셔도 괜찮아요']] },
+  indoor_eating: { label: '실내 취식 허용 범위', opts: [['none', '방에서 안 먹는 편만 괜찮아요'], ['snack', '간식·음료까지 괜찮아요'], ['meal', '식사·배달음식도 괜찮아요']] },
+  alarm_style:   { label: '기상 알람 허용 범위 [추가]', opts: [['silent', '알람 없이 무음만 괜찮아요'], ['once', '한 번에 끝나는 알람까지 괜찮아요'], ['multi', '여러 번 울리는 알람도 괜찮아요']] },
+};
+for (const [name, t] of Object.entries(TOLERANCE)) {
+  RM_OVERRIDE[name] = { type: 'radio', noAny: true, list: true, label: t.label, options: t.opts.map(([v, l, d]) => o(v, l, d)) };
 }
-
-// ================= 2. 모달(팝업창) 제어 기능 =================
-function openFilterModal() {
-  const modal = document.getElementById('filter-modal');
-  if (modal) modal.classList.remove('hidden');
+// 민감도 슬라이더: 나의 민감도 값(1~5)을 가운데로 두고 양 끝을 -3~+3 범위로 지정 (학번·나이 범위와 같은 서식)
+// 민감도 범위 슬라이더: 나의 성향과 같은 1~5 눈금·끝 글자, 룸메가 괜찮은 민감도 범위를 양 끝으로 지정
+const SENS_ENDS = { noise_sensitivity: ['둔감', '보통', '예민'], temp_sensitivity: ['추위 많이 탐', '보통', '더위 많이 탐'], smell_sensitivity: ['둔감', '보통', '예민'] };
+const SENS_STEPS = { noise_sensitivity: ['많이 둔감', '둔감', '보통', '예민', '많이 예민'], temp_sensitivity: ['추위 많이 탐', '추위 탐', '보통', '더위 탐', '더위 많이 탐'], smell_sensitivity: ['많이 둔감', '둔감', '보통', '예민', '많이 예민'] };
+for (const [name, label] of [['noise_sensitivity', '소음 민감도 허용 범위'], ['temp_sensitivity', '온도 민감도 허용 범위'], ['smell_sensitivity', '냄새 민감도 허용 범위']]) {
+  RM_OVERRIDE[name] = { type: 'dual', label, min: 1, max: 5, ends: SENS_ENDS[name], steps: SENS_STEPS[name] };
 }
-function closeFilterModal() {
-  const modal = document.getElementById('filter-modal');
-  if (modal) modal.classList.add('hidden');
-}
-
-// 이전 버전 질문지로 쓴 글은 기본값이 섞여 있어서 폼을 비워서 다시 받습니다.
-function answersForForm(post) {
-  return post && (post.schema_version ?? 0) >= SCHEMA_VERSION ? (post.answers || {}) : {};
-}
-
-function openProfileEdit() {
-  resetMissingWatch();
-  if (!currentUser) {   // 로그인 필요
-    openAuthModal('login');
-    setMsg('로그인하면 내 정보를 작성할 수 있어요.', false);
-    return;
-  }
-  // 임시 저장한 내용이 있으면 그걸, 없으면 이미 올린 글의 답안을 폼에 채워서 보여줌
-  const draft = readDraft();
-  renderProfileSections(draft ? draft.answers : answersForForm(myPost));
-  const title = document.getElementById('post-title');
-  title.value = draft ? draft.title : (myPost?.title || '');
-  title.maxLength = 60;
-  profileBaseline = formSnapshot();   // 연 직후 상태: 나중에 달라졌는지 확인하는 기준
-  document.getElementById('profile-modal').classList.remove('hidden');
-  if (draft) showToast('임시 저장한 내용을 불러왔어요.');
-}
-
-// ---------- 임시 저장 (저장하기 버튼) ----------
-// 게시 전에 작성 중인 내용을 이 브라우저(localStorage)에 사용자별로 보관합니다. DB·목록에는 영향 없음.
-// 질문지 버전이 바뀌면(SCHEMA_VERSION) 예전 임시 저장은 무시합니다.
-const draftKey = () => `khumate-draft:${currentUser?.id}`;
-function readDraft() {
-  try {
-    const d = JSON.parse(localStorage.getItem(draftKey()));
-    return d && d.v === SCHEMA_VERSION && d.answers ? d : null;
-  } catch { return null; }
-}
-function clearDraft() { try { localStorage.removeItem(draftKey()); } catch {} }
-
-async function saveDraft() {
-  if (!currentUser) { closeProfileEdit(true); return openAuthModal('login'); }
-  if (!(await khuConfirm('지금 내용 그대로 비공개 상태로 저장할까요?\n목록에서는 내려가고, 게시하기를 누르면 다시 올라가요.', { okText: '저장' }))) return;
-  const title = document.getElementById('post-title').value;
-  const p = collectProfile();   // 안 고른 항목은 null/'' 로 저장 → 다시 열면 미응답 상태 그대로
-  // 1) 이 브라우저에 보관 (기존 방식)
-  let ok = true;
-  try { localStorage.setItem(draftKey(), JSON.stringify({ v: SCHEMA_VERSION, title, answers: p })); }
-  catch { ok = false; }
-  // 2) 카드도 DB에 임시저장 (목록·매칭에는 안 뜸). 필수 항목 없이 있는 만큼 저장 (빈 칸은 null)
-  const studentId = digits(p.student_id), birthYear = digits(p.birth_year);
-  const yearOk = birthYear.length === 4 && +birthYear >= 1980 && +birthYear <= 2019;
-  let dbMsg = '카드를 보관했어요. 게시하기를 눌러야 목록에 올라가요.';
-  try {
-    await savePost({
-      user_id: currentUser.id,
-      title: title.trim().slice(0, 60) || '룸메이트 구해요',
-      gender: p.gender || null, dorm_period: p.dorm_period || null, dept: p.dept || '',
-      student_id: studentId.length === 2 ? studentId : null,
-      birth_year: yearOk ? birthYear : null,
-      answers: { ...p, student_id: studentId.length === 2 ? studentId : '', birth_year: yearOk ? birthYear : '' },
-      schema_version: SCHEMA_VERSION,
-      status: 'draft',
-    });
-    if (myPost?.status === 'published') dbMsg = '카드를 보관했어요. 목록에서 내려갔으니, 게시하기를 눌러야 다시 올라가요.';
-  } catch (e) { console.error(e); dbMsg = '카드 보관에 실패했어요. 인터넷 연결을 확인해 주세요.'; }
-  closeProfileEdit(true);
-  showToast(ok ? dbMsg : '이 브라우저에서는 임시 저장을 할 수 없어요.');
-  await loadPosts();
-}
-
-// 잠깐 떴다 사라지는 안내 문구
-// ================= 사이트 서식 팝업 (브라우저 기본 창 대신) =================
-// khuConfirm(문구) → 확인이면 true, 취소면 false / khuAlert(문구) → 확인만 있는 안내
-function khuDialog({ message, okText = '확인', cancelText = null }) {
-  return new Promise(resolve => {
-    document.getElementById('khu-dialog')?.remove();
-    const wrap = document.createElement('div');
-    wrap.id = 'khu-dialog';
-    wrap.className = 'fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-4';
-    wrap.innerHTML = `
-      <div class="bg-white w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden">
-        <div class="border-b border-slate-100 px-5 py-3">
-          <p class="text-red-600 font-black tracking-tight">KHUMATE</p>
-        </div>
-        <div class="px-5 py-5">
-          <p class="text-sm text-slate-700 leading-relaxed whitespace-pre-line">${esc(message)}</p>
-        </div>
-        <div class="px-5 pb-5 flex gap-2">
-          ${cancelText ? `<button data-r="0" class="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl transition">${esc(cancelText)}</button>` : ''}
-          <button data-r="1" class="flex-1 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-sm transition">${esc(okText)}</button>
-        </div>
-      </div>`;
-    const close = v => {
-      wrap.remove();
-      document.removeEventListener('keydown', onKey);
-      resolve(v);
-    };
-    const onKey = e => {
-      if (e.key === 'Escape' && cancelText) close(false);
-      if (e.key === 'Enter') close(true);
-    };
-    wrap.addEventListener('click', e => {
-      const b = e.target.closest('button[data-r]');
-      if (b) close(b.dataset.r === '1');
-    });
-    document.addEventListener('keydown', onKey);
-    document.body.appendChild(wrap);
-    wrap.querySelector('button[data-r="1"]').focus();
-  });
-}
-const khuConfirm = (message, opts = {}) => khuDialog({ message, cancelText: '취소', okText: '확인', ...opts });
-const khuAlert = message => khuDialog({ message });
-
-function showToast(text) {
-  document.getElementById('khu-toast')?.remove();
-  const el = document.createElement('div');
-  el.id = 'khu-toast';
-  el.className = 'fixed bottom-24 left-1/2 -translate-x-1/2 z-[60] bg-slate-900 text-white text-xs font-semibold px-4 py-2.5 rounded-full shadow-lg max-w-[90vw] text-center';
-  el.textContent = text;
-  document.body.appendChild(el);
-  setTimeout(() => el.remove(), 2600);
-}
-// 수정 중 내용이 바뀌었는지 비교하기 위한 기준 (openProfileEdit 에서 정함)
-let profileBaseline = null;
-// 화면에 있는 입력칸 값 전체를 기준으로 비교 (제목·답안·시간 선택 칸의 숨은 값까지 포함)
-const formSnapshot = () => JSON.stringify(
-  [...(document.getElementById('profile-modal')?.querySelectorAll('input, textarea') || [])].map(el =>
-    [el.value, el.checked ?? null, el.dataset?.touched ?? null]));
-
-// force: 저장한 뒤 닫는 경우처럼 확인이 필요 없을 때 true. 그 밖(✕ 버튼 등)에서 바뀐 내용이 있으면 확인창을 띄움
-async function closeProfileEdit(force = false) {
-  const modal = document.getElementById('profile-modal');
-  if (!modal) return;
-  if (!force && profileBaseline !== null && formSnapshot() !== profileBaseline
-      && !(await khuConfirm('저장하지 않은 내용이 있어요.\n저장하지 않고 닫을까요?', { okText: '닫기' }))) return;
-  profileBaseline = null;
-  modal.classList.add('hidden');
-}
-
-// ================= 3. 글 목록 + 매칭 (Supabase DB) =================
-let currentUser = null;     // 로그인한 사용자 (auth.js 가 알려줌)
-let myPost = null;          // 내가 올린 글 (없으면 null)
-let listState = null;       // 마지막으로 불러온 목록 { mode, ranked | browse }
-let sortMode = 'match';     // 'match'(매칭순) | 'latest'(최신순)
-let loadedUserId;           // 목록을 마지막으로 불러온 사용자 id (undefined = 아직 안 불러옴)
-let loadSeq = 0;
-let aiByUid = new Map();    // AI 분석 결과 (user_id → { rule_score, adjust, final, summary, good, warn })
-let aiRunning = false;            // 오래된 응답이 새 응답을 덮어쓰지 않게 하는 번호
-
-// 로그인 상태가 바뀔 때 호출됨 (auth.js).
-// 탭 복귀·토큰 갱신 때도 호출되므로, 사용자가 실제로 바뀐 경우에만 다시 불러옴
-function onAuthChanged(session) {
-  currentUser = session?.user ?? null;
-  const id = currentUser?.id ?? null;
-  if (id === loadedUserId) return;
-  loadedUserId = id;
-  aiByUid.clear(); aiLatest = null; aiNote = ''; aiError = '';
-  loadPosts();
-}
-
-// 숫자만 남기기 ("24학번" → "24")
-const digits = v => String(v ?? '').replace(/\D/g, '');
-
-// 매칭률 배지 색 (80↑ 진한 빨강, 60↑ 주황, 그 아래 회색)
-// 매칭률 배지 색: 점수가 높을수록 진함 (6단계)
-const scoreTone = score => score >= 90 ? 'bg-red-700'
-  : score >= 80 ? 'bg-red-600'
-  : score >= 70 ? 'bg-red-500'
-  : score >= 60 ? 'bg-orange-500'
-  : score >= 50 ? 'bg-orange-400'
-  : 'bg-slate-400';
-
-function matchBadgeHtml(m) {
-  return `<span class="ml-auto px-2 py-0.5 ${scoreTone(m.score)} text-white rounded-md">${m.conflict ? '⚠ ' : ''}매칭률 ${m.score}%</span>`;
-}
-
-// post: DB 행 / match: matchScore() 결과 (내 글이거나 둘러보기면 null)
-const MY_STATUS_LABEL = { published: '공개 중', draft: '비공개 중', archived: '비공개 중' };
-
-function cardHtml(post, match = null, plain = false, inList = false) {
-  const mine = !plain && currentUser && post.user_id === currentUser.id;   // plain: 읽기 전용 (확정 카드 복사본)
-  const blank = !!post.blank;   // 아직 카드를 쓰지 않은 내 칸 (미리보기용, 저장된 글 아님)
-  // 나와 같은 성별·거주 기간인 남의 카드는 살짝 붉게 구분 (목록에서만)
-  const sameCond = !plain && !mine && !!myPost && post.gender === myPost.gender && post.dorm_period === myPost.dorm_period;
-  // 내 카드 오른쪽 위: 공개 중(누르면 비공개로) / 비공개 중. 임시저장도 비공개로 보여 줌
-  const isPublic = post.status === 'published';
-  const stateHtml = blank
-    ? `<span class="ml-auto px-2.5 py-1 rounded-lg bg-slate-400 text-white text-xs font-bold">📝 작성 전</span>`
-    : `<button onclick="event.stopPropagation(); archiveMyPost()" class="ml-auto px-2.5 py-1 rounded-lg ${isPublic ? 'bg-red-600 hover:bg-red-700' : 'bg-slate-500 hover:bg-slate-600'} text-white text-xs font-bold shadow-sm transition">${isPublic ? '🌐 공개 중' : '🔒 비공개 중'}</button>`;
-  // 로그인 안 한 사용자는 카드 내용을 볼 수 없으니 로그인 창을 띄움
-  const open = blank ? 'openMyCardModal()' : !currentUser ? "openAuthModal('login')" : `openViewModal('${esc(post.user_id)}')`;
-  // 값이 비어 있으면 그 칸은 안 보여 줌
-  const chip = (v, cls) => v ? `<span class="${cls}">${esc(v)}</span>` : '';
-  return `
-    <div data-uid="${esc(post.user_id)}" onclick="${open}" class="${sameCond ? 'bg-rose-50/50' : 'bg-white'} ${mine ? 'border-transparent' : sameCond ? 'border-red-200 hover:border-red-300' : 'border-slate-200 hover:border-red-300'} p-5 rounded-2xl border cursor-pointer shadow-sm hover:shadow-md transition space-y-2.5">
-      <!-- 1단: 성별 & 거주기간 (붉은색 강조 태그) + 매칭률 -->
-      <div class="flex items-center gap-1.5 text-xs font-bold">
-        ${chip(post.gender, 'px-2.5 py-1 bg-red-100 text-red-600 rounded-md border border-red-200')}
-        ${chip(post.dorm_period, 'px-2.5 py-1 bg-red-50 text-red-600 rounded-md border border-red-100')}
-        ${mine ? (inList ? '<span class="ml-auto px-2.5 py-1 rounded-lg bg-red-600 text-white text-xs font-bold">✦ 내 글</span>' : stateHtml) : match ? matchBadgeHtml(match) : ''}
-      </div>
-
-      <!-- 2단: 게시글 제목 (크게) -->
-      <h3 class="font-black ${blank ? 'text-slate-300' : 'text-slate-800'} text-lg leading-snug pt-0.5">${esc(post.title)}</h3>
-
-      <!-- 3단: 학과 & 학번 & 나이(출생년도) -->
-      <div class="flex flex-wrap items-center gap-1.5 text-xs font-medium text-slate-600 pt-1 border-t border-slate-100">
-        ${post.dept ? `<span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700 font-semibold">${esc(post.dept)}</span>` : ''}
-        ${post.student_id ? `<span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700">${esc(post.student_id)}학번</span>` : ''}
-        ${post.birth_year ? `<span class="px-2 py-0.5 bg-slate-100 rounded text-slate-700">${esc(post.birth_year)}년생</span>` : ''}
-        ${mine && !blank && !inList ? `<span class="ml-auto"><button onclick="event.stopPropagation(); removeMyPost()" class="text-slate-400 hover:text-red-600 underline">🗑️ 내 글 삭제</button></span>` : ''}
-      </div>
-    </div>`;
-}
-
-function showListMessage(text) {
-  document.getElementById('card-list-container').innerHTML =
-    `<p class="text-center text-sm text-slate-400 py-10">${text}</p>`;
-}
-
-const bannerHtml = (html, action = '') =>
-  `<div class="bg-red-50 border border-red-100 text-red-700 text-xs font-semibold rounded-xl px-4 py-3 leading-relaxed">${html}${action}</div>`;
-
-// 정렬 버튼 표시 갱신 (관련순은 내 글이 있을 때만 사용 가능)
-function updateSortButtons() {
-  const matched = listState?.mode === 'matched';
-  const active = 'text-red-600 font-bold', idle = 'hover:text-slate-800';
-  const on = matched ? sortMode : 'latest';
-  const latest = document.getElementById('sort-latest'), match = document.getElementById('sort-match');
-  document.getElementById('ai-open-btn')?.classList.toggle('hidden', !matched);
-  if (!latest || !match) return;
-  latest.className = on === 'latest' ? active : idle;
-  match.className = (on === 'match' ? active : idle) + (matched ? '' : ' opacity-40 cursor-not-allowed');
-  match.title = matched ? '' : '내 정보를 작성하면 관련도 순으로 볼 수 있어요';
-}
-
-function setSort(mode) {
-  if (mode === 'match' && listState?.mode !== 'matched') return;
-  sortMode = mode;
-  renderList();
-}
-
-// 이미 불러온 데이터로 목록을 그림 (정렬 버튼을 눌러도 DB를 다시 부르지 않음)
-function renderList() {
-  const box = document.getElementById('card-list-container');
-  const mineBox = document.getElementById('my-post-container');
-  if (!box || !mineBox || !listState) return;
-  updateSortButtons();
-  const openBtn = '<button onclick="openProfileEdit()" class="ml-1 underline">내 정보 작성하기</button>';
-  const loginBtn = '<button onclick="openAuthModal(\'login\')" class="ml-1 underline">로그인하기</button>';
-
-  // 내 글은 필터 줄 아래 별도 칸에 표시 (목록에는 넣지 않음)
-  // 카드가 없으면 빈 내 매칭카드 모양을 띄우고, 그 아래 빨간 박스로 안내
-  const blankPost = { user_id: currentUser?.id, status: 'draft', blank: true, title: '아직 작성한 카드가 없어요', gender: '', dorm_period: '', dept: '', student_id: '', birth_year: '' };
-  mineBox.innerHTML = myPost ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="khu-grad-border">${cardHtml(myPost)}</div>`
-    : currentUser ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="khu-grad-border">${cardHtml(blankPost)}</div><div class="mt-2">${bannerHtml('내 매칭카드를 완성하고 게시하여 매칭에 참여하세요.', openBtn)}</div>` : '';
-
-  const parts = [];
-  if (listState.mode === 'matched') {
-    let rows, text;
-    if (sortMode === 'latest') {
-      // 최신순: 성별·거주 기간과 상관없이 전체 글. 같은 조건인 글에만 매칭률을 붙임
-      const byId = new Map(listState.ranked.map(r => [r.post.user_id, r.match]));
-      rows = listState.browse
-        .map(p => ({ post: p, match: byId.get(p.user_id) ?? null }));
-      text = `전체 매칭 카드 ${rows.length}개를 최근 수정순으로 보여드려요. 같은 성별·거주 기간 글에는 매칭률이 함께 떠요.`;
-    } else {
-      rows = listState.ranked;
-      text = `${esc(myPost.gender)} · ${esc(myPost.dorm_period)} 조건이 같은 룸메이트 ${rows.length}명을 관련도 높은 순으로 보여드려요.`;
-    }
-    parts.push(bannerHtml(`${text} (카드를 누르면 답안을 볼 수 있어요)`));
-    parts.push(...(rows.length
-      ? rows.map(r => r.post.user_id === currentUser?.id
-          ? `<div class="khu-grad-border">${cardHtml(r.post, null, false, true)}</div>`
-          : cardHtml(r.post, r.match))
-      : ['<p class="text-center text-sm text-slate-400 py-10">아직 같은 조건의 글이 없어요. 조금만 기다려 주세요!</p>']));
-  } else {
-    const msg = listState.mode === 'confirmed' ? '룸메가 확정됐어요. 카드는 목록에서 내려갔고, 하우스룰 탭에서 서로의 카드를 볼 수 있어요.'
-      : listState.mode === 'draft' ? '비공개 상태예요. 게시하기를 눌러야 목록과 매칭에 올라가요.'
-      : listState.mode === 'archived' ? '카드가 비공개 중이에요. 목록과 매칭에서 숨겨져 있어요. 공개 중으로 바꾸면 다시 참여해요.'
-      : listState.mode === 'outdated' ? '질문지가 새로워졌어요. 새 질문에 답하고 다시 게시하면 매칭에 참여할 수 있어요.'
-      : listState.mode === 'guest' ? '로그인하면 같은 성별·같은 거주 기간 룸메이트를 관련도 순으로 볼 수 있어요. (지금은 글만 볼 수 있어요)'
-      : null;   // 카드가 없을 때는 위의 내 매칭 카드 칸이 안내하므로 따로 띄우지 않음
-    if (msg) parts.push(bannerHtml(msg, listState.mode === 'guest' ? loginBtn : openBtn));
-    const others = listState.browse.filter(p => !currentUser || p.user_id !== currentUser.id);
-    parts.push(...(others.length ? others.map(p => cardHtml(p)) : ['<p class="text-center text-sm text-slate-400 py-10">아직 올라온 글이 없어요. 첫 글을 올려 보세요!</p>']));
-  }
-  box.innerHTML = parts.join('');
-}
-
-async function loadPosts() {
-  const box = document.getElementById('card-list-container');
-  if (!box) return;
-  const seq = ++loadSeq;
-  const uid = currentUser?.id ?? null;
-  try {
-    let mine = null, state;
-    if (!uid) {
-      // 로그인 안 한 사용자: 글 목록만 (쪽지 등은 막혀 있음)
-      state = { mode: 'guest', browse: await fetchBrowsePosts(GUEST_LIST_COLUMNS) };
-    } else {
-      mine = await fetchMyPost(uid);
-      if (mine && mine.status !== 'published') {
-        // 임시저장·보관 중인 카드: 목록과 매칭에서 빠짐 (내 카드 칸에만 보임). 확정된 룸메가 있으면 확정 상태
-        const confirmed = await fetchAcceptedMatch(uid);
-        const mode = confirmed ? 'confirmed' : mine.status === 'archived' ? 'archived' : 'draft';
-        state = { mode, browse: await fetchBrowsePosts() };
-      } else if (mine && (mine.schema_version ?? 0) >= SCHEMA_VERSION) {
-        // 같은 성별·같은 거주 기간만 DB에서 가져와서(하드 필터) 점수로 정렬
-        const candidates = await fetchCandidates(mine);
-        state = { mode: 'matched', ranked: rankMatches(mine, candidates, SCHEMA_VERSION), browse: await fetchBrowsePosts() };
-      } else {
-        state = { mode: mine ? 'outdated' : 'nopost', browse: await fetchBrowsePosts() };
-      }
-    }
-    if (seq !== loadSeq) return;   // 그 사이 더 새로운 요청이 시작됨
-    myPost = mine; listState = state;
-    renderList();
-  } catch (e) {
-    if (seq !== loadSeq) return;
-    console.error(e);
-    showListMessage('글을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.');
-  }
-}
-
-// 커스텀 게시 확인 모달 열기/닫기
-function closeConfirmModal() {
-  const modal = document.getElementById('confirm-modal');
-  if (modal) modal.classList.add('hidden');
-}
-
-// 입력 검사: 문제가 있으면 안내하고 null, 괜찮으면 게시할 값을 돌려줌
-function validateProfile() {
-  const p = collectProfile();   // 기본 프로필 + 설문 전체 (profile-schema.js 기준)
-
-  const missing = findMissing(p);
-  if (missing.length) {
-    showProfileTab(scopeOfField(missing[0].name));   // 빈 항목이 있는 탭으로 이동 (질문 순서상 첫 번째 항목 기준)
-    highlightMissing(missing);
-    const names = missing.slice(0, 4).map(m => m.label).join(', ');
-    khuAlert(`아직 답하지 않은 항목이 ${missing.length}개 있어요.\n(${names}${missing.length > 4 ? ' 외' : ''})`);
-    return null;
-  }
-  const studentId = digits(p.student_id), birthYear = digits(p.birth_year);
-  if (studentId.length !== 2) { khuAlert('학번은 숫자 2자리로 입력해 주세요. (예: 24)'); return null; }
-  if (birthYear.length !== 4 || +birthYear < 1980 || +birthYear > 2019) { khuAlert('출생년도는 1980~2019 사이 숫자 4자리로 입력해 주세요. (예: 2005)'); return null; }
-  return { p, studentId, birthYear };
-}
-
-// 게시하기 버튼: 검사를 통과해야 확인 모달이 열림
-function confirmPublish() {
-  if (!currentUser) return openAuthModal('login');
-  if (!validateProfile()) return;
-  const modal = document.getElementById('confirm-modal');
-  if (modal) modal.classList.remove('hidden');
-}
-
-// 게시하기: 내 글이 이미 있으면 새 내용으로 덮어쓰기 (사용자당 글 1개)
-let publishing = false;
-async function executePublish() {
-  if (publishing) return;
-  if (!currentUser) { closeConfirmModal(); return openAuthModal('login'); }
-
-  const v = validateProfile();   // 확인 모달이 열려 있는 동안 값이 바뀌었을 수도 있어 한 번 더
-  if (!v) return closeConfirmModal();
-  const { p, studentId, birthYear } = v;
-
-  const row = {
-    user_id: currentUser.id,
-    title: document.getElementById('post-title').value.trim().slice(0, 60) || '룸메이트 구해요',
-    gender: p.gender,
-    dorm_period: p.dorm_period,
-    dept: p.dept || '',
-    student_id: studentId,
-    birth_year: birthYear,
-    answers: { ...p, student_id: studentId, birth_year: birthYear },   // 설문 전체 (수정 때 다시 불러옴 / 매칭에 사용)
-    schema_version: SCHEMA_VERSION,
-    status: 'published',   // 게시: 목록과 매칭에 올라감
-  };
-  // 룸메가 확정된 동안에는 목록에 다시 올리지 않고 보관 상태로 저장
-  const confirmed = await fetchAcceptedMatch(currentUser.id).catch(() => null);
-  if (confirmed) row.status = 'archived';
-
-  publishing = true;
-  try {
-    await savePost(row);
-  } catch (e) {
-    console.error(e);
-    publishing = false;
-    closeConfirmModal();
-    return khuAlert('저장에 실패했어요. 로그인 상태와 인터넷 연결을 확인해 주세요.');
-  }
-  publishing = false;
-
-  clearDraft();   // 게시했으니 임시 저장은 더 필요 없음 (이후엔 게시된 글이 폼에 불러와짐)
-  closeConfirmModal();
-  closeProfileEdit(true);
-  if (confirmed) showToast('룸메가 확정된 상태라 목록에는 올리지 않고 보관해 두었어요.');
-  await loadPosts();
-}
-
-// 카드 보관: 데이터는 남기고 목록·매칭에서만 숨김. 다시 보관 해제하면 게시 상태로 돌아감
-// 공개 중 ↔ 비공개 중 (버튼을 누르면 반대 상태로. 각각 팝업으로 확인)
-async function archiveMyPost() {
-  if (!currentUser || !myPost) return;
-  const toPublic = myPost.status !== 'published';
-  if (toPublic) {
-    // 공개로 바꾸려면 모든 항목을 채워야 함 (비어 있으면 어떤 항목인지 알려 주고 막음)
-    const missing = findMissing(myPost.answers || {});
-    if (missing.length) {
-      const names = missing.slice(0, 4).map(m => m.label).join(', ');
-      return khuAlert(`항목을 모두 채워야 공개할 수 있어요.\n아직 비어 있는 항목 ${missing.length}개: ${names}${missing.length > 4 ? ' 외' : ''}\n\n수정하기에서 채운 뒤 다시 눌러 주세요.`);
-    }
-    if (await fetchAcceptedMatch(currentUser.id).catch(() => null)) {
-      return khuAlert('룸메가 확정된 동안에는 공개로 바꿀 수 없어요. 하우스룰 탭에서 확정을 해제하면 가능해요.');
-    }
-    if (!(await khuConfirm('카드를 공개 상태로 바꿀까요?\n목록과 매칭에 다시 올라가요.', { okText: '공개로' }))) return;
-  } else {
-    if (!(await khuConfirm('지금 내용 그대로 비공개 상태로 바꿀까요?\n목록에서만 내려가고, 카드 내용과 룸메 신청은 그대로 남아요.', { okText: '비공개로' }))) return;
-  }
-  try { await setPostStatus(currentUser.id, toPublic ? 'published' : 'archived'); }
-  catch (e) { console.error(e); return khuAlert('처리에 실패했어요.'); }
-  showToast(toPublic ? '카드를 공개했어요. 다시 목록에 올라갔어요.' : '카드를 비공개로 바꿨어요. 목록에서는 보이지 않아요.');
-  await loadPosts();
-}
-
-async function removeMyPost() {
-  if (!currentUser) return;
-  const confirmed = await fetchAcceptedMatch(currentUser.id).catch(() => null);
-  const msg = '카드와 작성한 내용이 모두 삭제돼요.\n삭제한 글은 되돌릴 수 없어요.' + (confirmed ? '\n확정된 룸메와의 카드 기록은 하우스룰에 남아요.' : '');
-  if (!(await khuConfirm(msg, { okText: '삭제' }))) return;
-  try { await deletePost(currentUser.id); } catch (e) { return khuAlert('삭제에 실패했어요.'); }
-  clearDraft();   // 이 브라우저에 남은 임시 저장도 지워서 수정 화면에 다시 나오지 않게
-  await loadPosts();
-}
-
-// ================= 5. 다른 사람 글 보기 (읽기 전용 답안) =================
-// 카드를 누르면 DB에서 그 글의 답안을 다시 받아와서, 내 정보 수정 폼과 같은 모양으로 보여줍니다.
-// 모든 입력칸은 비활성화되어 있어서 볼 수만 있고 바꿀 수 없어요.
-async function openViewModal(userId) {
-  let row;
-  try { row = await fetchPostById(userId); }
-  catch (e) { console.error(e); return khuAlert('글을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.'); }
-  if (!row) row = snapshotCache.get(userId);   // 카드를 지웠어도 확정 당시 복사본이 있으면 보여 줌 (matches.js)
-  if (!row) return khuAlert('이미 삭제된 글이에요.');
-
-  document.getElementById('view-title').textContent = row.title;
-  document.getElementById('view-meta').textContent =
-    [row.gender, row.dorm_period, row.dept, `${row.student_id}학번`, `${row.birth_year}년생`].filter(Boolean).join(' · ');
-  renderProfileSections(row.answers || {}, 'view-sections');
-
-  // AI 분석 결과가 있으면 답안 위에 보여 줌 (로그인한 사용자만 있음)
-  const ai = currentUser ? aiByUid.get(row.user_id) : null;
-  const aiBox = document.getElementById('view-ai');
-  aiBox.innerHTML = ai ? aiBoxHtml(ai) : '';
-  aiBox.classList.toggle('hidden', !ai);
-  // 내 카드가 있고 남의 카드면 항목별 비교를 같이 보여 줌
-  // 점수 설명: 각 질문 칸 바로 아래에 붙이고, 칸을 찾지 못한 항목만 아래 비교표에 남김
-  const cmpBox = document.getElementById('view-compare');
-  const canCompare = !!currentUser && !!myPost && row.user_id !== currentUser.id;
-  viewCompareCtx = canCompare ? { a: myPost.answers || {}, b: row.answers || {} } : null;
-  cmpBox.innerHTML = '';
-  cmpBox.classList.add('hidden');
-
-  // 쪽지 버튼: 로그인 안 했거나 내 글이면 비활성화 (쪽지 기능 자체는 아직 준비 중)
-  const msgBtn = document.getElementById('view-msg-btn');
-  msgBtn.dataset.peer = row.user_id;
-  msgBtn.dataset.title = row.title || '';
-  // 내 카드면 아래에 수정하기 버튼 (닫기 버튼은 없앰: 위 ✕ 로 닫음)
-  const footer = document.getElementById('view-footer');
-  const isOwn = !!currentUser && row.user_id === currentUser.id;
-  footer.innerHTML = isOwn
-    ? `<button onclick="closeViewModal(); openProfileEdit()" class="w-full py-3 bg-gradient-to-r from-red-600 to-orange-500 hover:shadow-lg text-white font-bold rounded-xl shadow-sm transition">수정하기</button>`
-    : '';
-  footer.classList.toggle('hidden', !isOwn);
-  const own = !!currentUser && row.user_id === currentUser.id;
-  msgBtn.disabled = false;   // 차단하지 않음: 로그인·공개 여부는 누를 때 팝업으로 안내
-  msgBtn.classList.toggle('hidden', own);   // 내 카드에는 쪽지 버튼 자체를 숨김
-  msgBtn.title = '';
-
-  const scope = document.getElementById('view-sections');
-  scope.querySelectorAll('input, select, textarea, button').forEach(el => { el.disabled = true; el.tabIndex = -1; });
-  document.getElementById('view-modal').classList.remove('hidden');
-  relayoutViewCompare();
-}
-// 하단 "내 매칭카드" 버튼: 내 카드 모달을 연다 (거기서 수정하기 → 수정창). 카드가 아직 없으면 바로 수정창
-function openMyCardModal() {
-  if (!currentUser) return openProfileEdit();   // 로그인 안내는 수정창 쪽에서 처리
-  if (myPost) return openViewModal(currentUser.id);
-  // 아직 아무것도 안 쓴 경우: 빈 답안을 그대로 채운 모양으로 띄움 (읽기 전용, 수정하기 버튼으로 수정창)
-  document.getElementById('view-title').textContent = '내 매칭 카드';
-  document.getElementById('view-meta').textContent = '';
-  renderProfileSections({}, 'view-sections');
-  document.getElementById('view-ai').classList.add('hidden');
-  document.getElementById('view-msg-btn').classList.add('hidden');
-  const footer = document.getElementById('view-footer');
-  footer.innerHTML = `<button onclick="closeViewModal(); openProfileEdit()" class="w-full py-3 bg-gradient-to-r from-red-600 to-orange-500 hover:shadow-lg text-white font-bold rounded-xl shadow-sm transition">수정하기</button>`;
-  footer.classList.remove('hidden');
-  const scope = document.getElementById('view-sections');
-  scope.querySelectorAll('input, select, textarea, button').forEach(el => { el.disabled = true; el.tabIndex = -1; });
-  document.getElementById('view-modal').classList.remove('hidden');
-}
-// 쪽지 보내기·룸메 신청 전에 내 카드가 공개 중인지 DB에서 다시 확인
-async function requirePublishedCard() {
-  if (!currentUser) return false;
-  let p;
-  try { p = await fetchMyPost(currentUser.id); }
-  catch { showToast('카드 상태를 확인하지 못했어요. 잠시 후 다시 해 주세요.'); return false; }
-  if (p?.status === 'published') return true;
-  await khuAlert('내 매칭 카드를 공개해야 쪽지를 보내고 룸메 신청을 할 수 있어요.\n수정하기에서 카드를 완성한 뒤 공개로 바꿔 주세요.');
-  return false;
-}
-function onMessageClick() {
-  khuAlert('쪽지 기능은 준비 중이에요.');
-}
-// 쪽지 버튼: 답안 보기 창을 닫고 상대와의 대화창을 염 (messages.js)
-async function onNoteClick() {
-  const btn = document.getElementById('view-msg-btn');
-  if (!currentUser) return khuAlert('로그인 후 쪽지를 보낼 수 있어요.');
-  if (!(await requirePublishedCard())) return;   // 내 카드가 공개 중이 아니면 안내 팝업만 띄움
-  closeViewModal();
-  openThread(btn.dataset.peer, btn.dataset.title);
-}
-function closeViewModal() {
-  const modal = document.getElementById('view-modal');
-  if (modal) modal.classList.add('hidden');
-}
-document.addEventListener('keydown', e => {
-  if (e.key !== 'Escape') return;
-  if (!document.getElementById('view-modal').classList.contains('hidden')) closeViewModal();
-  else closeAiModal();
+// 원하는 대인관계: 룸메가 어느 정도 관계를 원하는지 범위로 지정 (나의 성향 눈금과 같음, 가운데에서 시작)
+RM_OVERRIDE.roommate_relation = { type: 'dual', label: '룸메이트와의 선호 관계 범위', min: 1, max: 5, ends: ['각자 생활', '적당히', '친구처럼'], steps: ['각자 생활', '가벼운 인사', '적당히', '자주 어울림', '친구처럼'] };
+// 조건부 룸메 항목: 조건(when)은 룸메 탭 안의 답을 봄 (rm_ 이름), 공유 항목은 내 답을 봄
+// 공구·공유 의사: 룸메 탭에서도 '상관없음' 없이 O/X 성격의 선택지만
+['hanger_buy', 'hanger_lend', 'fridge_buy', 'fridge_lend'].forEach(name => { RM_OVERRIDE[name] = { noAny: true }; });
+RM_OVERRIDE.clean_freq = { type: 'dual', ticks: FREQ_TICKS, sublabel: '허용하는 청소 주기 범위', when: { name: 'rm_clean_style', value: 'often' } };
+RM_OVERRIDE.rotation = { type: 'fixed', multi: true, source: 'rotation', label: '당번제', cols: 2,
+  options: [o('ordered', 'O (순서대로)'), o('free', 'X (각자 알아서)')] };
+RM_OVERRIDE.shared_bin = { type: 'fixed', multi: true, source: 'shared_bin', sublabel: '쓰레기통 공유', cols: 2,
+  options: [o('yes', 'O', '공유함'), o('no', 'X', '공유 안 함')] };
+RM_OVERRIDE.trash_freq = { type: 'dual', ticks: FREQ_TICKS, sublabel: '허용하는 비움 주기 범위', when: { name: 'rm_trash_style', value: 'regular' } };
+RM_OVERRIDE.trash_rotation = { type: 'fixed', multi: true, source: 'trash_rotation', sublabel: '쓰레기 당번제', cols: 2, when: { name: 'shared_bin', value: 'yes' },
+  options: [o('ordered', 'O', '순서대로'), o('free', 'X', '각자 알아서')] };
+// 룸메 샤워 소요 시간: 40분 이상은 사실상 상관없음
+RM_OVERRIDE.shower_duration = { options: [o('5', '5분 이내'), o('10', '10분'), o('15', '15분'), o('20', '20분'), o('30', '30분'), o('40', '40분 이상(상관없음)')] };
+// 룸메 탭에는 '상관없음'을 자동으로 붙이지 않음 (필요한 칸은 RM_OVERRIDE 의 options 에 직접 any 를 넣음: 현재 취미만)
+const withAny = f => f;
+// 원하는 룸메 칸: 이름에 rm_ 를 붙이고, 1개 고르기(radio)는 여러 개 고를 수 있게 바꿈 (서식은 그대로)
+// 체크박스는 '상관없음'을 고르면 나머지가 풀리고, 다른 걸 고르면 '상관없음'이 풀림 (exclusive)
+const toRoommate = fields => fields.map(f => {
+  if (f.type === 'group') return { ...f, fields: toRoommate(f.fields) };
+  const ov = RM_OVERRIDE[f.name] || {};
+  let g = withAny({ ...f, ...ov, name: 'rm_' + f.name });
+  if (f.when && !ov.when) g = { ...g, when: { ...f.when, name: 'rm_' + f.when.name } };   // 하위 질문: 룸메 탭의 부모 답을 봄
+  if (g.type === 'radio' && !ov.type) g = { ...g, type: 'checkbox', default: [] };
+  if (g.type === 'checkbox') g = { ...g, exclusive: 'any' };
+  return g;
 });
 
-// ================= 5. AI 정밀 분석 (상위 20명, 하이브리드) =================
-// 목록 정렬은 규칙 점수로 전체가 즉시 됩니다. 'AI 정밀 분석' 버튼을 누르면 팝업이 열리고,
-// 상위 20명을 AI가 한 번에 읽어 규칙 점수를 ±10점 보정하고 설명을 붙입니다.
-// 결과는 팝업의 순위 카드로 보여 주고, 같은 쌍은 서버 DB에 저장되어 다시 AI를 부르지 않아요.
-let aiLatest = null;   // 마지막 분석 결과 (최종 점수 순 정렬 전 원본), 아직 없으면 null
-let aiNote = '';       // 마지막 분석의 안내 문구 (예: AI 설정이 없음)
-let aiError = '';      // 마지막 분석 실패 메시지
+const ROOMMATE_SECTIONS = [
+  RM_BASIC,
+  ...PROFILE_SCHEMA.filter(s => s.id !== 'basic').map(s => ({ ...s, id: 'rm_' + s.id, scope: 'roommate', fields: toRoommate(s.fields) })),
+];
+PROFILE_SCHEMA.push(...ROOMMATE_SECTIONS);
 
-function openAiModal() {
-  if (!currentUser || listState?.mode !== 'matched') return;
-  renderAiModal();
-  document.getElementById('ai-modal').classList.remove('hidden');
-}
+// 맨 마지막 항목: 자기소개 글 (나의 설문 탭에만 있음, 룸메 탭에는 만들지 않으려고 위에서 만든 뒤에 붙임)
+// 점수 규칙에는 쓰지 않고, AI 분석에서만 참고함. 답안이 바뀌면 AI 캐시도 자동으로 다시 계산됨 (글 수정 시각 기준)
+PROFILE_SCHEMA.push({
+  id: 'intro',
+  title: '자기소개',
+  fields: [
+    { name: 'intro', label: '소개글', type: 'textarea', optional: true, maxLength: 300,
+      placeholder: '생활 습관, 성격, 룸메에게 바라는 점 등을 자유롭게 적어 주세요.',
+      hint: '연락처·계정 등 개인정보는 적지 마세요. 최대 300자.' },
+  ],
+});
 
-function closeAiModal() {
-  document.getElementById('ai-modal')?.classList.add('hidden');
-}
+// 모달 탭 정의 (섹션의 scope 와 맞춰짐)
+const PROFILE_TABS = [
+  { id: 'me', label: '내 정보' },
+  { id: 'roommate', label: '원하는 룸메' },
+];
 
-function renderAiModal() {
-  const info = document.getElementById('ai-modal-info');
-  const btn = document.getElementById('ai-run-btn');
-  const body = document.getElementById('ai-modal-body');
-  if (!info || !btn || !body) return;
-  const n = Math.min(20, listState?.ranked?.length || 0);
-  info.textContent = `같은 성별·거주 기간 관련도 상위 ${n}명 대상`;
-  btn.disabled = aiRunning || n === 0;
-  btn.textContent = aiRunning ? '분석 중…' : aiLatest ? '🔄 다시 분석' : '▶ 분석 시작';
-  body.innerHTML = aiBodyHtml(n);
-}
-
-function aiBodyHtml(n) {
-  if (aiRunning) {
-    return `
-      <div class="text-center py-14">
-        <div class="text-4xl animate-pulse">🤖</div>
-        <p class="text-sm font-bold text-slate-700 mt-3">AI가 상위 ${n}명의 답안을 읽고 있어요</p>
-        <p class="text-xs text-slate-400 mt-1">보통 20~60초 걸려요. 창을 닫아도 분석은 계속돼요.</p>
-      </div>`;
-  }
-  if (aiError) {
-    return `<div class="bg-rose-50 border border-rose-100 text-rose-700 text-sm font-semibold rounded-xl p-4">${esc(aiError)}</div>`;
-  }
-  if (!aiLatest) {
-    return `
-      <div class="bg-gradient-to-br from-red-50 to-orange-50 border border-red-100 rounded-2xl p-5 space-y-2 text-sm text-slate-700 leading-relaxed">
-        <p class="font-black text-slate-800">이렇게 분석해요</p>
-        <p>① 규칙 점수가 높은 상위 ${n}명을 골라요.</p>
-        <p>② AI가 답안을 함께 읽고 점수를 ±10점 보정해요.</p>
-        <p>③ 잘 맞는 점과 확인할 점을 한 줄씩 설명해요.</p>
-        <p class="text-xs text-slate-400 pt-1">분석 결과는 저장되어서 같은 사람은 다음에 바로 나와요. 1시간에 10번까지 누를 수 있어요.</p>
-      </div>`;
-  }
-  if (!aiLatest.length) {
-    return `<p class="text-center text-sm text-slate-400 py-10">${esc(aiNote || '분석할 후보가 아직 없어요.')}</p>`;
-  }
-  const note = aiNote ? `<p class="text-xs font-semibold text-amber-600 bg-amber-50 rounded-lg px-3 py-2">${esc(aiNote)}</p>` : '';
-  return `${note}<p class="text-xs font-bold text-slate-500">AI 최종 점수 순 · ${aiLatest.length}명</p>` +
-    aiLatest.map((r, i) => aiCardHtml(r, i + 1)).join('');
-}
-
-// AI 결과 카드 (순위 · 최종 점수 · 설명 · 잘 맞는 점 · 확인할 점). 누르면 답안 보기
-function aiCardHtml(r, rank) {
-  const post = listState?.ranked?.find(x => x.post.user_id === r.user_id)?.post;
-  if (!post) return '';
-  const medal = ['from-amber-300 to-yellow-500', 'from-slate-300 to-slate-400', 'from-orange-300 to-orange-500'][rank - 1];
-  const badge = medal ? `bg-gradient-to-br ${medal} text-white shadow` : 'bg-slate-100 text-slate-500';
-  const tone = r.final >= 80 ? 'text-red-600' : r.final >= 60 ? 'text-orange-500' : 'text-slate-500';
-  const adj = r.adjust > 0 ? `+${r.adjust}` : `${r.adjust}`;
-  const adjTone = r.adjust > 0 ? 'text-emerald-600' : r.adjust < 0 ? 'text-rose-500' : 'text-slate-400';
-  const meta = [post.dept, `${post.student_id}학번`, `${post.birth_year}년생`].filter(Boolean).map(esc).join(' · ');
-  const good = (r.good || []).map(g => `<span class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-100">✔ ${esc(g)}</span>`).join('');
-  const warn = (r.warn || []).map(w => `<span class="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[11px] font-bold border border-amber-100">⚠ ${esc(w)}</span>`).join('');
-  return `
-    <div onclick="openViewModal('${esc(r.user_id)}')" class="cursor-pointer bg-white rounded-2xl border ${rank <= 3 ? 'border-red-200' : 'border-slate-200'} p-4 shadow-sm hover:shadow-lg hover:-translate-y-0.5 transition space-y-3">
-      <div class="flex items-start gap-3">
-        <div class="w-9 h-9 rounded-xl ${badge} flex items-center justify-center text-sm font-black shrink-0">${rank}</div>
-        <div class="min-w-0 flex-1">
-          <h4 class="font-black text-slate-800 truncate">${esc(post.title)}</h4>
-          <p class="text-[11px] text-slate-500 font-semibold truncate">${meta}</p>
-        </div>
-        <div class="text-right shrink-0">
-          <p class="text-2xl font-black ${tone} leading-none">${r.final}<span class="text-xs font-bold text-slate-400">점</span></p>
-          <p class="text-[10px] font-bold ${adjTone} mt-1">규칙 ${r.rule_score} ${adj}</p>
-        </div>
-      </div>
-      <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
-        <div class="h-full bg-gradient-to-r from-red-500 to-orange-400 rounded-full" style="width:${r.final}%"></div>
-      </div>
-      <p class="text-sm text-slate-700 leading-relaxed">${esc(r.summary)}</p>
-      ${good || warn ? `<div class="flex flex-wrap gap-1.5">${good}${warn}</div>` : ''}
-      <p class="text-xs font-bold text-red-600 text-right">답안 보기 →</p>
-    </div>`;
-}
-
-async function runAiMatch() {
-  if (aiRunning || !currentUser) return;
-  aiRunning = true;
-  aiError = '';
-  renderAiModal();
-  try {
-    const { data } = await sb.auth.getSession();
-    if (!data.session) throw new Error('로그인이 만료됐어요. 다시 로그인해 주세요.');
-    const res = await fetch('/api/match-ai', {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${data.session.access_token}`, 'Content-Type': 'application/json' },
-      body: '{}',
-    });
-    const json = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(json.error || 'AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.');
-    applyAiResults(json.results || [], json.warning || '');
-  } catch (e) {
-    console.error(e);
-    aiError = e.message || 'AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.';
-  } finally {
-    aiRunning = false;
-    renderAiModal();
-  }
-}
-
-// 분석 결과 저장: 팝업은 최종 점수 순으로 그리고, 답안 보기 창에서도 쓸 수 있게 사람별로도 보관
-// 목록 순서는 바꾸지 않음 (목록은 규칙 점수 기준으로 항상 즉시 정렬)
-function applyAiResults(results, warning) {
-  aiLatest = results.slice().sort((x, y) => y.final - x.final || y.rule_score - x.rule_score);
-  aiNote = warning;
-  results.forEach(r => aiByUid.set(r.user_id, r));
-}
-
-// 답의 값을 사람이 읽는 말로 (선택지는 라벨, 범위는 a~b)
-function valueText(key, v) {
-  if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)) return '미응답';
-  const f = allFields().find(x => x.name === key);
-  const lab = x => f?.options?.find(op => String(op.value) === String(x))?.label ?? String(x);
-  if (Array.isArray(v)) return v.map(lab).join(', ');
-  if (typeof v === 'object') return v.from !== undefined ? `${v.from}~${v.to}` : `${v.lo}~${v.hi}`;
-  return lab(v);
-}
-// 정밀 분석 창: 내 카드와 항목별로 비교 (내 허용 범위 안인지, 상대 허용 범위 안인지, 점수)
-// 설명 박스 없이 질문 칸 자체에 표시 (남의 카드 보기에서만)
-//  - 룸메 탭 선택지: 내 정보가 허용되는 선택지는 초록, 멀수록 노랑→빨강
-//  - 룸메 탭 범위 슬라이더: 내 정보 값을 점으로 표시, 범위 안이면 초록 테두리 / 밖이면 빨강
-//  - 정보 탭 슬라이더: 선 색은 숨기고, 내 룸메 허용 범위를 초록 띠로 표시
-let viewCompareCtx = null;   // 지금 보기 모달의 내 답·상대 답 (탭을 바꾸면 다시 그림)
-function relayoutViewCompare() {
-  if (!viewCompareCtx) return;
-  inlineCompare(viewCompareCtx.a, viewCompareCtx.b);
-}
-
-// 남의 카드 보기: 질문 칸마다 한 줄 표시 + 탭 맨 위 요약 (설명 박스·색 없음)
-//  - 내 정보 탭: 상대 정보가 내 룸메 허용 범위 안인지
-//  - 원하는 룸메 탭: 내 정보가 상대 룸메 허용 범위 안인지
-function inlineCompare(a, b) {
-  const scope = document.getElementById('view-sections');
-  if (!scope) return;
-  scope.querySelectorAll('.khu-cmp').forEach(el => el.remove());   // 이전 표시 지우고 다시 그림
-  const fieldEl = (name, panel) => scope.querySelector(`[data-panel="${panel}"] [data-fields~="${name}"]`);
-  const pill = (ok, text) => `<span class="khu-cmp inline-flex items-center max-w-full px-2.5 py-1 rounded-full text-[11px] leading-snug font-bold border ${ok ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-rose-50 text-rose-600 border-rose-200'}">${text}</span>`;
-  const resultText = (p, any) => any ? '✅ 상관없음 (모두 허용)'
-    : !isVal(p) ? '➖ 조건 없음'
-    : p >= 0.999 ? '✅ 허용 범위 안'
-    : `❌ 허용 범위 밖 (일치율 ${Math.round(p * 100)}%)`;
-  const addPill = (el, html) => {
-    const wrap = `<div class="khu-cmp mt-1.5">${html}</div>`;
-    const lab = el.querySelector(':scope > label');
-    if (lab) lab.insertAdjacentHTML('afterend', wrap);
-    else el.insertAdjacentHTML('afterbegin', wrap);
-  };
-  const tally = { me: { ok: 0, total: 0 }, roommate: { ok: 0, total: 0 } };
-
-  for (const d of DIMENSIONS) {
-    if (!d.pref) continue;
-    const meKey = d.uses.find(k => !/^rm_/.test(k));
-    const rmKey = d.uses.find(k => /^rm_/.test(k));
-    if (!meKey || !rmKey) continue;
-    const anyA = anyPick(a, d), anyB = anyPick(b, d);
-    const pa = anyA ? 1 : d.pref(a, b);   // 내 룸메 허용 범위 ↔ 상대 정보
-    const pb = anyB ? 1 : d.pref(b, a);   // 상대 룸메 허용 범위 ↔ 내 정보
-
-    const infoEl = fieldEl(meKey, 'me');
-    if (infoEl && isVal(pa)) {
-      const ok = pa >= 0.999;
-      addPill(infoEl, pill(ok, `내 룸메 허용 범위: ${esc(valueText(rmKey, a[rmKey]))} ${ok ? '✅' : '❌'}`));
-      tally.me.total++; if (ok) tally.me.ok++;
-    }
-    const rmEl = fieldEl(rmKey, 'roommate');
-    if (rmEl && isVal(pb)) {
-      const ok = pb >= 0.999;
-      addPill(rmEl, pill(ok, `내 정보: ${esc(valueText(meKey, a[meKey]))} ${ok ? '✅' : '❌'}`));
-      tally.roommate.total++; if (ok) tally.roommate.ok++;
-    }
-  }
-
-  // 탭 맨 위 요약 + 범례
-  const score = matchScore(a, b);
-  const summary = (panel, label, t) => {
-    const el = scope.querySelector(`[data-panel="${panel}"]`);
-    if (!el) return;
-    el.insertAdjacentHTML('afterbegin', `
-      <div class="khu-cmp rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 text-xs text-slate-700 leading-relaxed">
-        <p class="font-bold">${label} 기준 맞는 항목 <span class="text-red-600">${t.ok}/${t.total}</span>${score ? ` · 규칙 점수 ${score.score}점` : ''}</p>
-        <p class="text-slate-500 mt-0.5">✅ 허용 범위 안 · ❌ 허용 범위 밖 (괄호는 일치율)</p>
-      </div>`);
-  };
-  summary('me', '내 룸메 허용', tally.me);
-  summary('roommate', '상대 룸메 허용', tally.roommate);
-}
-
-function compareHtml(mine, theirs) {
-  const rows = matchBreakdown(mine, theirs);
-  if (!rows.length) return '<p class="text-xs text-slate-400">비교할 항목이 부족해요.</p>';
-  return compareRowsHtml(rows, matchScore(mine, theirs));
-}
-function compareRowsHtml(rows, ms) {
-  const tone = t => t.startsWith('범위 안') ? 'text-emerald-600 font-bold' : t.startsWith('범위 밖') ? 'text-amber-600 font-bold' : 'text-slate-400';
-  return `
-    <div class="rounded-xl border border-slate-200 bg-white p-4 text-xs leading-relaxed space-y-2">
-      <p class="font-bold text-slate-800">🔍 내 카드와 비교 <span class="font-normal text-slate-500">${ms ? `· 규칙 점수 ${ms.score}점` : ''}</span></p>
-      ${rows.map(r => `
-        <div class="py-2 border-b border-slate-100 last:border-none space-y-0.5">
-          <p class="font-bold text-slate-700">${esc(r.label)} <span class="font-semibold text-red-600">${r.score}점</span></p>
-          <p class="text-slate-600">나: ${esc(valueText(r.key, r.mine))} · 상대: ${esc(valueText(r.key, r.theirs))}</p>
-          <p><span class="text-slate-500">내 허용:</span> <span class="${tone(r.mineRange)}">${esc(r.mineRange)}</span> · <span class="text-slate-500">상대 허용:</span> <span class="${tone(r.theirsRange)}">${esc(r.theirsRange)}</span></p>
-        </div>`).join('')}
-    </div>`;
-}
-
-function aiBoxHtml(ai) {
-  const adj = ai.adjust > 0 ? `+${ai.adjust}` : `${ai.adjust}`;
-  return `
-    <div class="bg-red-50/60 border border-red-100 text-slate-700 rounded-xl p-4 text-xs leading-relaxed space-y-2">
-      <p class="font-bold text-red-600">🤖 AI 분석 <span class="font-normal text-slate-500">· 규칙 ${ai.rule_score}점 → AI 보정 ${adj} → 최종 ${ai.final}점</span></p>
-      <p>${esc(ai.summary)}</p>
-      ${ai.good?.length ? `<p><span class="text-emerald-600 font-bold">✔ 잘 맞는 점</span> ${ai.good.map(esc).join(' · ')}</p>` : ''}
-      ${ai.warn?.length ? `<p><span class="text-amber-600 font-bold">⚠ 확인해 보세요</span> ${ai.warn.map(esc).join(' · ')}</p>` : ''}
-    </div>`;
-}
-
-// ================= 4. 초기 실행 =================
-// 질문을 추가했는데 매칭 규칙(matching.js)에 없으면 콘솔에서 알려 줌
-checkMatchCoverage(PROFILE_SCHEMA.filter(s => sectionScope(s) === 'me'));   // 원하는 룸메(rm_) 질문은 매칭 규칙을 따로 만들 예정
-
-// auth.js 가 로그인 상태를 알려 주는 시점이 이 파일이 로드되기보다 빠르면 놓칠 수 있으므로,
-// 시작할 때 현재 세션을 한 번 직접 확인 (같은 사용자면 onAuthChanged 가 중복 로딩을 막아 줌)
-sb.auth.getSession().then(({ data }) => onAuthChanged(data.session));
+if (typeof module !== 'undefined') module.exports = { PROFILE_SCHEMA, SCHEMA_VERSION };
