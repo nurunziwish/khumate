@@ -7,8 +7,8 @@ const POSTS_TABLE = 'roommate_posts';
 
 // 목록 카드에 필요한 컬럼만 (answers 같은 큰 데이터는 제외)
 const LIST_COLUMNS = 'user_id,title,gender,dorm_period,dept,student_id,birth_year,schema_version,updated_at';
-// 로그인 안 한 사용자용: DB 권한(guest-browse-setup.sql)에서 허용한 열만 (학번·출생년도 제외)
-const GUEST_LIST_COLUMNS = 'user_id,title,gender,dorm_period,dept,schema_version,updated_at';
+// 로그인 안 한 사용자용: DB 권한(guest-browse-setup.sql)에서 허용한 열만 (답안·자기소개 제외)
+const GUEST_LIST_COLUMNS = 'user_id,title,gender,dorm_period,dept,student_id,birth_year,schema_version,updated_at';
 
 // 내 글 1개 (없으면 null)
 async function fetchMyPost(userId) {
