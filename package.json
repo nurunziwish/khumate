@@ -1,8 +1,9 @@
 {
-  "functions": {
-    "server.js": {
-      "includeFiles": "khumate-client/**",
-      "maxDuration": 60
-    }
+  "name": "khumate",
+  "private": true,
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "@supabase/supabase-js": "^2.45.0"
   }
 }
