@@ -808,7 +808,9 @@ function inlineCompare(a, b) {
     else el.insertAdjacentHTML('afterbegin', wrap);
   };
   // 수면 시간·학과처럼 한 묶음 안에 칸이 나란히 있는 항목은, 해당 칸 바로 위에 알약을 붙임
-  const SUBS = { sleep_time: '취침', wake_time: '기상', rm_sleep_time: '취침', rm_dept: '학과' };
+  const SUBS = { sleep_time: '취침', wake_time: '기상', rm_sleep_time: '취침', rm_dept: '학과', shower_duration: '소요 시간', rm_shower_duration: '소요 시간', shower_time: '시간대 (중복 선택)', rm_shower_time: '시간대 (중복 선택)' };
+  // 생활 리듬: 기상·취침 박스 아래에 한 줄로 붙임
+  const placeBelow = (el, html) => { if (el) el.insertAdjacentHTML('beforeend', `<div class="khu-cmp mt-2">${html}</div>`); };
   const placeIn = (el, key, html) => {
     if (!el) return;
     const sub = SUBS[key];
@@ -821,9 +823,9 @@ function inlineCompare(a, b) {
   for (const d of DIMENSIONS) {
     if (!d.pref) {
       // 허용 범위가 없는 항목: 답끼리 얼마나 맞는지 (행거·냉장고 공유 의사 등). 취미·이미 알약 붙은 칸은 건너뜀
-      if (d.key === 'rhythm') {   // 생활 리듬: 기상 칸 위에 한 줄
+      if (d.key === 'rhythm') {   // 생활 리듬: 기상·취침 박스 아래에 한 줄
         const sv = d.sim(a, b);
-        if (isVal(sv)) { const ok = sv >= 0.5; placeIn(fieldEl('sleep_time', 'me'), 'wake_time', pill(ok, `생활 리듬 ${ok ? '겹침 ✅' : '안 겹침 ❌'}`)); }
+        if (isVal(sv)) { const ok = sv >= 0.5; placeBelow(fieldEl('sleep_time', 'me'), pill(ok, `생활 리듬 ${ok ? '겹침 ✅' : '안 겹침 ❌'}`)); }
         continue;
       }
       const meKeyS = d.uses.find(k => !/^rm_/.test(k));
@@ -880,7 +882,14 @@ function inlineCompare(a, b) {
     }
   }
 
-  // 성별·거주 기간: 원하는 룸메 칸은 나와 같게 고정돼 있어서, 상대 값이 같은지 알약으로
+  // 성별·거주 기간: 나와 같아야 해서 내 정보 탭은 내 값과, 원하는 룸메 탭은 고정 칸에 상대 값을 보여 줌
+  [['gender', 'gender', '성별'], ['dorm_period', 'dorm_period', '거주 기간']].forEach(([name, key, label]) => {
+    const el = fieldEl(name, 'me');
+    if (!el || !b[key]) return;
+    const ok = b[key] === a[key];
+    addPill(el, pill(ok, `상대 ${label}: ${esc(b[key])} ${ok ? '✅' : '❌'}`));
+    tally.me.total++; if (ok) tally.me.ok++;
+  });
   [['rm_fixed_gender', 'gender', '성별'], ['rm_fixed_dorm', 'dorm_period', '거주 기간']].forEach(([name, key, label]) => {
     const el = fieldEl(name, 'roommate');
     if (!el || !b[key]) return;

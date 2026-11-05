@@ -173,6 +173,14 @@ const showerPref = (me, other) => {
   if (!pick.length || !slots.length) return null;
   return slots.some(s => pick.includes(s)) ? 1 : .3;
 };
+// 샤워 소요 시간: 내가 고른 룸메 소요 시간 이하면 1 (40분 이상 = 상관없음). 넘으면 초과분만큼 완만히 감점
+const durPref = (me, o) => {
+  const lim = me.rm_shower_duration, v = o.shower_duration;
+  if (lim === undefined || lim === null || lim === '' || v === undefined || v === null || v === '') return null;
+  if (String(lim) === '40') return 1;
+  const over = Number(v) - Number(lim);
+  return over <= 0 ? 1 : clamp01(1 - over / 15);
+};
 const hobbyOverlap = (a, b) => {
   const norm = arr => new Set((Array.isArray(arr) ? arr : []).map(x => String(x).trim().toLowerCase()).filter(Boolean));
   const A = norm(a.hobby), B = norm(b.hobby);
@@ -277,6 +285,7 @@ const DIMENSIONS = [
   { key: 'stay_days', label: '상주 요일', weight: 3, uses: ['stay_days', 'rm_stay_days'],
     pref: stayPref, sim: (a, b) => jaccard(a.stay_days, b.stay_days) },
   { key: 'shower', label: '샤워 시간대', weight: 2, uses: ['shower_time', 'rm_shower_time'], pref: showerPref },
+  { key: 'shower_duration', label: '샤워 소요 시간', weight: 2, uses: ['shower_duration', 'rm_shower_duration'], pref: durPref },
 
   // ② 소음·환경
   { key: 'noise_sens', label: '소음 민감도', weight: 4, uses: ['noise_sensitivity', 'rm_noise_sensitivity'],
@@ -338,7 +347,6 @@ const DIMENSIONS = [
 const MATCH_IGNORED = {
   gender: '하드 필터', dorm_period: '하드 필터', rm_fixed_gender: '고정 칸 (저장 안 함)', rm_fixed_dorm: '고정 칸 (저장 안 함)',
   college: '참고 정보', rm_college: '단과대 선택 (저장 안 함)',
-  shower_duration: '샤워 소요 시간 (추후 반영)', rm_shower_duration: '샤워 소요 시간 (추후 반영)',
   smoking: '흡연 충돌 규칙', rm_smoking: '흡연 충돌 규칙',
   student_id: '학번 차이 항목에서 사용', birth_year: '나이 차이 항목에서 사용',
   intro: '자기소개 글 (점수 규칙에는 안 씀, AI 분석에서만 참고)',
