@@ -280,8 +280,8 @@ function renderList() {
   // 내 글은 필터 줄 아래 별도 칸에 표시 (목록에는 넣지 않음)
   // 카드가 없으면 빈 내 매칭카드 모양을 띄우고, 그 아래 빨간 박스로 안내
   const blankPost = { user_id: currentUser?.id, status: 'draft', blank: true, title: '아직 작성한 카드가 없어요', gender: '', dorm_period: '', dept: '', student_id: '', birth_year: '' };
-  mineBox.innerHTML = myPost ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="rounded-2xl shadow-lg">${cardHtml(myPost)}</div>`
-    : currentUser ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="rounded-2xl shadow-lg">${cardHtml(blankPost)}</div><div class="mt-2">${bannerHtml('내 매칭카드를 완성하고 게시하여 매칭에 참여하세요.', openBtn)}</div>` : '';
+  mineBox.innerHTML = myPost ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="khu-grad-shadow">${cardHtml(myPost)}</div>`
+    : currentUser ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="khu-grad-shadow">${cardHtml(blankPost)}</div><div class="mt-2">${bannerHtml('내 매칭카드를 완성하고 게시하여 매칭에 참여하세요.', openBtn)}</div>` : '';
 
   const parts = [];
   if (listState.mode === 'matched') {
@@ -299,7 +299,7 @@ function renderList() {
     parts.push(bannerHtml(`${text} (카드를 누르면 답안을 볼 수 있어요)`));
     parts.push(...(rows.length
       ? rows.map(r => r.post.user_id === currentUser?.id
-          ? `<div class="rounded-2xl shadow-lg">${cardHtml(r.post, null, false, true)}</div>`
+          ? `<div class="khu-grad-shadow">${cardHtml(r.post, null, false, true)}</div>`
           : cardHtml(r.post, r.match))
       : ['<p class="text-center text-sm text-slate-400 py-10">아직 같은 조건의 글이 없어요. 조금만 기다려 주세요!</p>']));
   } else {
@@ -609,14 +609,11 @@ function renderAiModal() {
     const r = aiByUid.get(x.post.user_id);
     return !!r && !!r.viewer_updated && new Date(r.viewer_updated).getTime() !== new Date(myPost.updated_at).getTime();
   });
-  let mc = document.getElementById('ai-my-changed');
-  if (!mc) { mc = document.createElement('span'); mc.id = 'ai-my-changed'; btn.parentElement.insertBefore(mc, btn); }
   const msgs = [myChanged ? '⚠ 내 카드가 바뀌었어요' : '', rankChanged ? '⚠ 관련도 순서가 바뀌었어요' : '', addedCount ? `➕ 새 카드 ${addedCount}명이 추가됐어요` : ''].filter(Boolean);
-  mc.className = msgs.length ? 'text-[11px] font-black text-white bg-rose-700 px-2 py-0.5 rounded-md mr-2 self-center' : 'hidden';
-  mc.textContent = msgs.join(' · ');
+  const notesHtml = msgs.length ? `<div class="space-y-1 mb-3">${msgs.map(m => `<p class="text-xs font-bold text-rose-600">${m}</p>`).join('')}</div>` : '';
   btn.disabled = aiRunning || n === 0 || allDone;
   btn.textContent = aiRunning ? '분석 중…' : allDone ? '✔ 분석 최신 상태' : aiLatest ? '🔄 다시 분석' : '▶ 분석 시작';
-  body.innerHTML = aiBodyHtml(n);
+  body.innerHTML = notesHtml + aiBodyHtml(n);
 }
 
 function aiBodyHtml(n) {
@@ -644,7 +641,7 @@ function aiBodyHtml(n) {
   if (!aiLatest.length) {
     return `<p class="text-center text-sm text-slate-400 py-10">${esc(aiNote || '분석할 후보가 아직 없어요.')}</p>`;
   }
-  const note = aiNote ? `<p class="text-xs font-semibold text-rose-600 bg-rose-50 rounded-lg px-3 py-2">${esc(aiNote)}</p>` : '';
+  const note = aiNote ? `<p class="text-xs font-bold text-rose-600 bg-rose-50 rounded-lg px-3 py-2">${esc(aiNote)}</p>` : '';
   return `${note}<p class="text-xs font-bold text-slate-500">AI 최종 점수 순 · ${aiLatest.length}명</p>` +
     aiLatest.map((r, i) => aiCardHtml(r, i + 1)).join('');
 }
@@ -1062,12 +1059,12 @@ function aiBoxHtml(ai) {
   const adj = ai.adjust > 0 ? `+${ai.adjust}` : `${ai.adjust}`;
   return `
     <div class="bg-red-50/60 border border-red-100 text-slate-700 rounded-xl p-4 text-xs leading-relaxed space-y-2">
-      <p class="font-bold text-red-600">🤖 AI 분석 <span class="font-bold">· 규칙 ${ai.rule_score}점 → AI 보정 ${adj} → 최종 ${ai.final}점</span></p>
+      <p class="font-bold text-red-600">🤖 AI 분석 <span class="font-bold text-slate-500">· 규칙 ${ai.rule_score}점 → AI 보정 ${adj} → 최종 ${ai.final}점</span></p>
       <p>${esc(ai.summary)}</p>
       ${ai.analysis ? `<p class="text-slate-600">${esc(ai.analysis)}</p>` : ''}
-      ${ai.good?.length ? `<p class="font-bold"><span class="text-emerald-600 font-bold">✔ 잘 맞는 점</span> ${ai.good.map(esc).join(' · ')}</p>` : ''}
-      ${ai.warn?.length ? `<p class="font-bold"><span class="text-rose-600 font-bold">⚠ 확인해 보세요</span> ${ai.warn.map(esc).join(' · ')}</p>` : ''}
-      ${ai.talk?.length ? `<p class="font-bold"><span class="text-red-600 font-bold">💬 맞춰 볼 것</span> ${ai.talk.map(esc).join(' · ')}</p>` : ''}
+      ${ai.good?.length ? `<p class="font-bold text-slate-600"><span class="text-emerald-600 font-bold">✔ 잘 맞는 점</span> ${ai.good.map(esc).join(' · ')}</p>` : ''}
+      ${ai.warn?.length ? `<p class="font-bold text-slate-600"><span class="text-rose-600 font-bold">⚠ 확인해 보세요</span> ${ai.warn.map(esc).join(' · ')}</p>` : ''}
+      ${ai.talk?.length ? `<p class="font-bold text-slate-600"><span class="text-red-600 font-bold">💬 맞춰 볼 것</span> ${ai.talk.map(esc).join(' · ')}</p>` : ''}
     </div>`;
 }
 
