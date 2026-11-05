@@ -502,10 +502,14 @@ async function openViewModal(userId) {
   // 내 카드면 아래에 수정하기 버튼 (닫기 버튼은 없앰: 위 ✕ 로 닫음)
   const footer = document.getElementById('view-footer');
   const isOwn = !!currentUser && row.user_id === currentUser.id;
+  const canAi = !isOwn && !!currentUser && !!myPost;   // 남의 카드: 이 카드만 AI 정밀 분석 (내 카드가 있을 때)
+  const sameCond = canAi && row.gender === myPost.gender && row.dorm_period === myPost.dorm_period;   // 같은 성별·거주 기간인지 (아니면 누를 때 경고)
   footer.innerHTML = isOwn
     ? `<button onclick="closeViewModal(); openProfileEdit()" class="w-full py-3 bg-gradient-to-r from-red-600 to-orange-500 hover:shadow-lg text-white font-bold rounded-xl shadow-sm transition">수정하기</button>`
-    : '';
-  footer.classList.toggle('hidden', !isOwn);
+    : canAi
+      ? `<button id="view-ai-btn" onclick="runSingleAi('${esc(row.user_id)}', ${sameCond})" class="w-full py-3 bg-gradient-to-r from-red-600 to-orange-500 hover:shadow-lg text-white font-bold rounded-xl shadow-sm transition disabled:bg-none disabled:bg-slate-300">🤖 AI 정밀 분석</button>`
+      : '';
+  footer.classList.toggle('hidden', !isOwn && !canAi);
   const own = !!currentUser && row.user_id === currentUser.id;
   msgBtn.disabled = false;   // 차단하지 않음: 로그인·공개 여부는 누를 때 팝업으로 안내
   msgBtn.classList.toggle('hidden', own);   // 내 카드에는 쪽지 버튼 자체를 숨김
@@ -686,6 +690,44 @@ async function runAiMatch() {
   }
 }
 
+// 보기 창의 'AI 정밀 분석': 이 카드 한 장만 분석해서 같은 서식으로 답안 위에 보여 줌
+let aiSingleRunning = false;
+async function runSingleAi(userId, sameCond) {
+  if (!sameCond) return khuAlert('성별 또는 거주 기간이 달라서 AI 정밀 분석을 할 수 없어요.\n같은 성별·같은 거주 기간의 카드만 분석할 수 있어요.');
+  if (aiSingleRunning || !currentUser) return;
+  aiSingleRunning = true;
+  const btn = document.getElementById('view-ai-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '🤖 AI 분석 중… (최대 1분)'; }
+  try {
+    const { data } = await sb.auth.getSession();
+    if (!data.session) throw new Error('로그인이 만료됐어요. 다시 로그인해 주세요.');
+    const res = await fetch('/api/match-ai', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${data.session.access_token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_id: userId }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error || 'AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.');
+    const r = (json.results || []).find(x => x.user_id === userId);
+    if (!r || !r.ai) throw new Error(json.warning || 'AI 분석 결과를 받지 못했어요. 잠시 후 다시 시도해 주세요.');
+    aiByUid.set(userId, r);
+    if (aiLatest) {   // AI 팝업 목록이 이미 있으면 이 카드 항목도 갱신
+      aiLatest = aiLatest.filter(x => x.user_id !== userId).concat(r)
+        .sort((x, y) => y.final - x.final || y.rule_score - x.rule_score);
+    }
+    const box = document.getElementById('view-ai');
+    box.innerHTML = aiBoxHtml(r);
+    box.classList.remove('hidden');
+  } catch (e) {
+    console.error(e);
+    khuAlert(e.message || 'AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.');
+  } finally {
+    aiSingleRunning = false;
+    const b = document.getElementById('view-ai-btn');
+    if (b) { b.disabled = false; b.textContent = '🤖 AI 정밀 분석'; }
+  }
+}
+
 // 분석 결과 저장: 팝업은 최종 점수 순으로 그리고, 답안 보기 창에서도 쓸 수 있게 사람별로도 보관
 // 목록 순서는 바꾸지 않음 (목록은 규칙 점수 기준으로 항상 즉시 정렬)
 function applyAiResults(results, warning) {
@@ -808,7 +850,7 @@ function inlineCompare(a, b) {
     else el.insertAdjacentHTML('afterbegin', wrap);
   };
   // 수면 시간·학과처럼 한 묶음 안에 칸이 나란히 있는 항목은, 해당 칸 바로 위에 알약을 붙임
-  const SUBS = { sleep_time: '취침', wake_time: '기상', rm_sleep_time: '취침', rm_dept: '학과', shower_duration: '소요 시간', rm_shower_duration: '소요 시간', shower_time: '시간대 (중복 선택)', rm_shower_time: '시간대 (중복 선택)' };
+  const SUBS = { sleep_time: '취침', wake_time: '기상', rm_sleep_time: '취침', rm_wake_time: '기상', rm_dept: '학과', shower_duration: '소요 시간', rm_shower_duration: '소요 시간', shower_time: '시간대 (중복 선택)', rm_shower_time: '시간대 (중복 선택)' };
   // 생활 리듬: 기상·취침 박스 아래에 한 줄로 붙임
   const placeBelow = (el, html) => { if (el) el.insertAdjacentHTML('beforeend', `<div class="khu-cmp mt-2">${html}</div>`); };
   const placeIn = (el, key, html) => {
@@ -887,7 +929,7 @@ function inlineCompare(a, b) {
     const el = fieldEl(name, 'me');
     if (!el || !b[key]) return;
     const ok = b[key] === a[key];
-    addPill(el, pill(ok, `상대 ${label}: ${esc(b[key])} ${ok ? '✅' : '❌'}`));
+    addPill(el, pill(ok, `내 ${label}: ${esc(a[key])} ${ok ? '✅' : '❌'}`));
     tally.me.total++; if (ok) tally.me.ok++;
   });
   [['rm_fixed_gender', 'gender', '성별'], ['rm_fixed_dorm', 'dorm_period', '거주 기간']].forEach(([name, key, label]) => {

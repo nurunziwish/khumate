@@ -56,6 +56,10 @@ app.post('/api/match-ai', async (req, res) => {
 
     if (!aiLimit.allow(uid)) return res.status(429).json({ error: '잠시 후 다시 시도해 주세요. (1시간에 10번까지 가능)' });
 
+    // 카드 한 장만 정밀 분석 (보기 창의 'AI 정밀 분석' 버튼): target_id 가 있으면 그 카드만 분석
+    const targetId = req.body?.target_id;
+    if (targetId !== undefined && !/^[0-9a-f-]{36}$/i.test(String(targetId))) return res.status(400).json({ error: '잘못된 카드예요.' });
+
     // 2) 내 글 확인 (최신 질문지로 올린 글만)
     const { data: me } = await sb.from('roommate_posts').select('*').eq('user_id', uid).maybeSingle();
     if (!me || (me.schema_version ?? 0) < SCHEMA_VERSION) {
@@ -63,11 +67,14 @@ app.post('/api/match-ai', async (req, res) => {
     }
 
     // 3) 같은 성별·같은 거주 기간 후보 → 규칙 점수 → 상위 20명
-    const { data: candidates, error: candErr } = await sb.from('roommate_posts').select('*')
+    let q = sb.from('roommate_posts').select('*')
       .eq('gender', me.gender).eq('dorm_period', me.dorm_period)
-      .gte('schema_version', SCHEMA_VERSION).neq('user_id', uid).limit(500);
+      .gte('schema_version', SCHEMA_VERSION).neq('user_id', uid);
+    if (targetId) q = q.eq('user_id', String(targetId));
+    const { data: candidates, error: candErr } = await q.limit(500);
     if (candErr) throw candErr;
-    const top = matching.rankMatches(me, candidates || [], SCHEMA_VERSION).slice(0, TOP_N);
+    const top = matching.rankMatches(me, candidates || [], SCHEMA_VERSION).slice(0, targetId ? 1 : TOP_N);
+    if (targetId && !top.length) return res.status(404).json({ error: '같은 성별·거주 기간의 최신 카드만 분석할 수 있어요.' });
     if (!top.length) return res.json({ results: [], warning: null });
 
     // 4) 캐시 확인: 내 글과 상대 글이 둘 다 그대로일 때만 캐시 사용
