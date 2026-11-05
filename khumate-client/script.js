@@ -182,7 +182,7 @@ function onAuthChanged(session) {
   const id = currentUser?.id ?? null;
   if (id === loadedUserId) return;
   loadedUserId = id;
-  aiByUid.clear(); aiLatest = null; aiNote = ''; aiError = '';
+  aiByUid.clear(); aiLatest = null; aiNote = ''; aiError = ''; savedAiLoaded = null;
   loadPosts();
 }
 
@@ -343,6 +343,7 @@ async function loadPosts() {
     }
     if (seq !== loadSeq) return;   // 그 사이 더 새로운 요청이 시작됨
     myPost = mine; listState = state;
+    loadSavedAi();   // 이미 분석한 카드 기록을 불러옴 (한 번만)
     renderList();
   } catch (e) {
     if (seq !== loadSeq) return;
@@ -481,7 +482,8 @@ async function openViewModal(userId) {
   // AI 분석 결과가 있으면 답안 위에 보여 줌 (로그인한 사용자만 있음)
   const ai = currentUser ? aiByUid.get(row.user_id) : null;
   const aiBox = document.getElementById('view-ai');
-  aiBox.innerHTML = ai ? aiBoxHtml(ai) : '';
+  const aiOld = ai && currentUser && myPost && row.user_id !== currentUser.id && aiState(row.user_id, row.updated_at) === 'stale';
+  aiBox.innerHTML = ai ? (aiOld ? '<p class="text-[11px] text-amber-600 font-bold px-1">⚠ 카드가 바뀌기 전 기준으로 분석한 결과예요. 다시 분석해 보세요.</p>' : '') + aiBoxHtml(ai) : '';
   aiBox.classList.toggle('hidden', !ai);
   // 내 카드가 있고 남의 카드면 항목별 비교를 같이 보여 줌
   // 점수 설명: 각 질문 칸 바로 아래에 붙이고, 칸을 찾지 못한 항목만 아래 비교표에 남김
@@ -502,14 +504,12 @@ async function openViewModal(userId) {
   // 내 카드면 아래에 수정하기 버튼 (닫기 버튼은 없앰: 위 ✕ 로 닫음)
   const footer = document.getElementById('view-footer');
   const isOwn = !!currentUser && row.user_id === currentUser.id;
-  const canAi = !isOwn && !!currentUser && !!myPost;   // 남의 카드: 이 카드만 AI 정밀 분석 (내 카드가 있을 때)
-  const sameCond = canAi && row.gender === myPost.gender && row.dorm_period === myPost.dorm_period;   // 같은 성별·거주 기간인지 (아니면 누를 때 경고)
+  viewRowCtx = row;
   footer.innerHTML = isOwn
     ? `<button onclick="closeViewModal(); openProfileEdit()" class="w-full py-3 bg-gradient-to-r from-red-600 to-orange-500 hover:shadow-lg text-white font-bold rounded-xl shadow-sm transition">수정하기</button>`
-    : canAi
-      ? `<button id="view-ai-btn" onclick="runSingleAi('${esc(row.user_id)}', ${sameCond})" class="w-full py-3 bg-gradient-to-r from-red-600 to-orange-500 hover:shadow-lg text-white font-bold rounded-xl shadow-sm transition disabled:bg-none disabled:bg-slate-300">🤖 AI 정밀 분석</button>`
-      : '';
-  footer.classList.toggle('hidden', !isOwn && !canAi);
+    : '';
+  footer.classList.toggle('hidden', !isOwn);
+  if (!isOwn && currentUser && myPost) renderViewAiFooter();   // 남의 카드: AI 정밀 분석 버튼 (상태에 따라 다르게)
   const own = !!currentUser && row.user_id === currentUser.id;
   msgBtn.disabled = false;   // 차단하지 않음: 로그인·공개 여부는 누를 때 팝업으로 안내
   msgBtn.classList.toggle('hidden', own);   // 내 카드에는 쪽지 버튼 자체를 숨김
@@ -593,10 +593,22 @@ function renderAiModal() {
   const btn = document.getElementById('ai-run-btn');
   const body = document.getElementById('ai-modal-body');
   if (!info || !btn || !body) return;
-  const n = Math.min(20, listState?.ranked?.length || 0);
+  const cands = (listState?.ranked || []).slice(0, 20);   // 서버가 분석하는 상위 20명과 같은 대상
+  const n = cands.length;
   info.textContent = `같은 성별·거주 기간 관련도 상위 ${n}명 대상`;
-  btn.disabled = aiRunning || n === 0;
-  btn.textContent = aiRunning ? '분석 중…' : aiLatest ? '🔄 다시 분석' : '▶ 분석 시작';
+  // 전원이 '분석 완료(바뀐 것 없음)'이면 버튼을 회색으로 막음
+  const allDone = n > 0 && cands.every(x => aiState(x.post.user_id, x.post.updated_at) === 'done');
+  // 내 카드가 분석 뒤에 바뀌었으면 버튼 옆에 안내
+  const myChanged = !!myPost && cands.some(x => {
+    const r = aiByUid.get(x.post.user_id);
+    return !!r && !!r.viewer_updated && new Date(r.viewer_updated).getTime() !== new Date(myPost.updated_at).getTime();
+  });
+  let mc = document.getElementById('ai-my-changed');
+  if (!mc) { mc = document.createElement('span'); mc.id = 'ai-my-changed'; btn.parentElement.insertBefore(mc, btn); }
+  mc.className = myChanged ? 'text-[11px] font-bold text-amber-200 mr-2 self-center' : 'hidden';
+  mc.textContent = myChanged ? '⚠ 내 카드가 바뀌었어요' : '';
+  btn.disabled = aiRunning || n === 0 || allDone;
+  btn.textContent = aiRunning ? '분석 중…' : allDone ? '✔ 분석 최신 상태' : aiLatest ? '🔄 다시 분석' : '▶ 분석 시작';
   body.innerHTML = aiBodyHtml(n);
 }
 
@@ -639,6 +651,7 @@ function aiCardHtml(r, rank) {
   const tone = r.final >= 80 ? 'text-red-600' : r.final >= 60 ? 'text-orange-500' : 'text-slate-500';
   const adj = r.adjust > 0 ? `+${r.adjust}` : `${r.adjust}`;
   const adjTone = r.adjust > 0 ? 'text-emerald-600' : r.adjust < 0 ? 'text-rose-500' : 'text-slate-400';
+  const targetChanged = !!r.target_updated && new Date(r.target_updated).getTime() !== new Date(post.updated_at).getTime();   // 이 카드(상대)만 바뀐 경우
   const meta = [post.dept, `${post.student_id}학번`, `${post.birth_year}년생`].filter(Boolean).map(esc).join(' · ');
   const good = (r.good || []).map(g => `<span class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-100">✔ ${esc(g)}</span>`).join('');
   const warn = (r.warn || []).map(w => `<span class="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[11px] font-bold border border-amber-100">⚠ ${esc(w)}</span>`).join('');
@@ -658,6 +671,7 @@ function aiCardHtml(r, rank) {
       <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
         <div class="h-full bg-gradient-to-r from-red-500 to-orange-400 rounded-full" style="width:${r.final}%"></div>
       </div>
+      ${targetChanged ? '<p class="text-[11px] font-bold text-amber-600">⚠ 이 카드가 바뀌었어요 (이전 분석 기준)</p>' : ''}
       <p class="text-sm text-slate-700 leading-relaxed">${esc(r.summary)}</p>
       ${r.analysis ? `<p class="text-xs text-slate-600 leading-relaxed">${esc(r.analysis)}</p>` : ''}
       ${good || warn ? `<div class="flex flex-wrap gap-1.5">${good}${warn}</div>` : ''}
@@ -690,11 +704,72 @@ async function runAiMatch() {
   }
 }
 
+// 저장된 AI 분석 불러오기 (새로고침 뒤에도 '분석 완료' 상태를 기억)
+let savedAiLoaded = null;
+function loadSavedAi() {
+  if (!currentUser || !myPost) return;
+  if (savedAiLoaded) return savedAiLoaded;
+  savedAiLoaded = (async () => {
+    try {
+      const { data } = await sb.auth.getSession();
+      if (!data.session) return;
+      const res = await fetch('/api/match-ai/saved', { headers: { Authorization: `Bearer ${data.session.access_token}` } });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'saved failed');
+      const list = json.results || [];
+      list.forEach(r => aiByUid.set(r.user_id, r));
+      if (!aiLatest && list.length) applyAiResults(list, '');
+      if (viewRowCtx && !document.getElementById('view-modal').classList.contains('hidden')) refreshViewAi();
+      if (!document.getElementById('ai-modal').classList.contains('hidden')) renderAiModal();
+    } catch (e) {
+      console.error(e);
+      savedAiLoaded = null;   // 실패하면 다음에 다시 시도
+    }
+  })();
+  return savedAiLoaded;
+}
+// 보기 창의 AI 박스·버튼을 지금 기록 기준으로 다시 그림
+function refreshViewAi() {
+  const row = viewRowCtx;
+  if (!row) return;
+  const ai = currentUser ? aiByUid.get(row.user_id) : null;
+  const aiBox = document.getElementById('view-ai');
+  const stale = !!ai && !!currentUser && !!myPost && row.user_id !== currentUser.id && aiState(row.user_id, row.updated_at) === 'stale';
+  aiBox.innerHTML = ai ? (stale ? '<p class="text-[11px] text-amber-600 font-bold px-1">⚠ 카드가 바뀌기 전 기준으로 분석한 결과예요. 다시 분석해 보세요.</p>' : '') + aiBoxHtml(ai) : '';
+  aiBox.classList.toggle('hidden', !ai);
+  renderViewAiFooter();
+}
+
+// 지금 보고 있는 카드 (AI 버튼 상태 계산용)
+let viewRowCtx = null;
+// 이 카드를 지금 내 글·상대 글 기준으로 분석했는지: 'done'(변경 없음) / 'stale'(바뀌었거나 이전 분석) / 'none'(분석 전)
+function aiState(userId, targetUpdated) {
+  const r = aiByUid.get(userId);
+  if (!r) return 'none';
+  const sameT = (x, y) => !!x && !!y && new Date(x).getTime() === new Date(y).getTime();
+  return myPost && sameT(r.viewer_updated, myPost.updated_at) && sameT(r.target_updated, targetUpdated) ? 'done' : 'stale';
+}
+// 보기 창 하단 AI 버튼: 분석 전 = 활성, 분석 후 변경 없음 = 회색(누르면 안내), 카드가 바뀌었으면 알림 + 활성
+function renderViewAiFooter() {
+  const footer = document.getElementById('view-footer');
+  const row = viewRowCtx;
+  if (!footer || !row || !myPost || !currentUser || row.user_id === currentUser.id) return;
+  const sameCond = row.gender === myPost.gender && row.dorm_period === myPost.dorm_period;
+  const st = aiState(row.user_id, row.updated_at);
+  const done = st === 'done';
+  const btnCls = done ? 'bg-slate-300 text-slate-600 cursor-not-allowed' : 'bg-gradient-to-r from-red-600 to-orange-500 hover:shadow-lg text-white';
+  const label = done ? '✔ 분석 완료 (카드 변경 없음)' : '🤖 AI 정밀 분석';
+  footer.innerHTML = `${st === 'stale' ? '<p class="text-xs font-bold text-amber-600 text-center mb-2">⚠ 카드 내용이 바뀌었어요. 다시 분석할 수 있어요.</p>' : ''}
+    <button id="view-ai-btn" onclick="runSingleAi('${esc(row.user_id)}', ${sameCond})" class="w-full py-3 ${btnCls} font-bold rounded-xl shadow-sm transition">${label}</button>`;
+  footer.classList.remove('hidden');
+}
+
 // 보기 창의 'AI 정밀 분석': 이 카드 한 장만 분석해서 같은 서식으로 답안 위에 보여 줌
 let aiSingleRunning = false;
 async function runSingleAi(userId, sameCond) {
   if (!sameCond) return khuAlert('성별 또는 거주 기간이 달라서 AI 정밀 분석을 할 수 없어요.\n같은 성별·같은 거주 기간의 카드만 분석할 수 있어요.');
   if (aiSingleRunning || !currentUser) return;
+  if (aiState(userId, viewRowCtx?.updated_at) === 'done') return khuAlert('이미 분석한 상태예요.\n카드 내용이 바뀌면 다시 분석할 수 있어요.');
   aiSingleRunning = true;
   const btn = document.getElementById('view-ai-btn');
   if (btn) { btn.disabled = true; btn.textContent = '🤖 AI 분석 중… (최대 1분)'; }
@@ -723,8 +798,7 @@ async function runSingleAi(userId, sameCond) {
     khuAlert(e.message || 'AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.');
   } finally {
     aiSingleRunning = false;
-    const b = document.getElementById('view-ai-btn');
-    if (b) { b.disabled = false; b.textContent = '🤖 AI 정밀 분석'; }
+    renderViewAiFooter();
   }
 }
 
@@ -978,12 +1052,12 @@ function aiBoxHtml(ai) {
   const adj = ai.adjust > 0 ? `+${ai.adjust}` : `${ai.adjust}`;
   return `
     <div class="bg-red-50/60 border border-red-100 text-slate-700 rounded-xl p-4 text-xs leading-relaxed space-y-2">
-      <p class="font-bold text-red-600">🤖 AI 분석 <span class="font-normal text-slate-500">· 규칙 ${ai.rule_score}점 → AI 보정 ${adj} → 최종 ${ai.final}점</span></p>
+      <p class="font-bold text-red-600">🤖 AI 분석 <span class="font-black text-slate-900">· 규칙 ${ai.rule_score}점 → AI 보정 ${adj} → 최종 ${ai.final}점</span></p>
       <p>${esc(ai.summary)}</p>
       ${ai.analysis ? `<p class="text-slate-600">${esc(ai.analysis)}</p>` : ''}
-      ${ai.good?.length ? `<p><span class="text-emerald-600 font-bold">✔ 잘 맞는 점</span> ${ai.good.map(esc).join(' · ')}</p>` : ''}
-      ${ai.warn?.length ? `<p><span class="text-amber-600 font-bold">⚠ 확인해 보세요</span> ${ai.warn.map(esc).join(' · ')}</p>` : ''}
-      ${ai.talk?.length ? `<p><span class="text-red-600 font-bold">💬 맞춰 볼 것</span> ${ai.talk.map(esc).join(' · ')}</p>` : ''}
+      ${ai.good?.length ? `<p class="font-bold text-slate-900"><span class="text-emerald-600 font-bold">✔ 잘 맞는 점</span> ${ai.good.map(esc).join(' · ')}</p>` : ''}
+      ${ai.warn?.length ? `<p class="font-bold text-slate-900"><span class="text-amber-600 font-bold">⚠ 확인해 보세요</span> ${ai.warn.map(esc).join(' · ')}</p>` : ''}
+      ${ai.talk?.length ? `<p class="font-bold text-slate-900"><span class="text-red-600 font-bold">💬 맞춰 볼 것</span> ${ai.talk.map(esc).join(' · ')}</p>` : ''}
     </div>`;
 }
 

@@ -128,6 +128,8 @@ app.post('/api/match-ai', async (req, res) => {
         rule_score: ruleScore,
         adjust: c ? c.adjust : 0,
         final: c ? ai.finalScore(ruleScore, c.adjust) : ruleScore,
+        viewer_updated: me.updated_at,   // 분석 당시 내 글·상대 글 수정 시각 (클라이언트가 '변경 없음'을 판단)
+        target_updated: r.post.updated_at,
         summary: c ? c.summary : '',
         analysis: c?.analysis || '',
         good: c?.good || [],
@@ -148,6 +150,58 @@ app.post('/api/match-ai', async (req, res) => {
 app.use(express.static(path.join(__dirname, '..', 'khumate-client')));
 
 // 로컬에서 직접 실행할 때만 포트를 열고, Vercel 같은 곳에서는 app 을 함수로 넘겨 씀
+// 저장된 AI 분석 불러오기: 새로고침해도 이미 분석한 카드를 기억하도록 DB 캐시만 읽음 (AI는 부르지 않음)
+// 바뀐 카드도 함께 내려보내고, 바뀌었는지는 클라이언트가 수정 시각으로 판단
+app.get('/api/match-ai/saved', async (req, res) => {
+  try {
+    const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    if (!token) return res.status(401).json({ error: '로그인이 필요해요.' });
+    const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+    const { data: userData, error: userErr } = await sb.auth.getUser(token);
+    if (userErr || !userData?.user) return res.status(401).json({ error: '로그인이 만료됐어요. 다시 로그인해 주세요.' });
+    const uid = userData.user.id;
+
+    const { data: me } = await sb.from('roommate_posts').select('*').eq('user_id', uid).maybeSingle();
+    if (!me || (me.schema_version ?? 0) < SCHEMA_VERSION) return res.json({ results: [], warning: null });
+
+    const { data: candidates } = await sb.from('roommate_posts').select('*')
+      .eq('gender', me.gender).eq('dorm_period', me.dorm_period)
+      .gte('schema_version', SCHEMA_VERSION).neq('user_id', uid).limit(500);
+    const top = matching.rankMatches(me, candidates || [], SCHEMA_VERSION).slice(0, TOP_N);
+    if (!top.length) return res.json({ results: [], warning: null });
+
+    const byId = new Map(top.map(r => [r.post.user_id, r]));
+    const { data: cached } = await sb.from('match_ai').select('*')
+      .eq('viewer_id', uid).in('target_id', [...byId.keys()]);
+    const results = [];
+    for (const c of cached || []) {
+      const r = byId.get(c.target_id);
+      if (!r) continue;
+      results.push({
+        user_id: c.target_id,
+        rule_score: r.match.score,
+        adjust: c.adjust,
+        final: ai.finalScore(r.match.score, c.adjust),
+        viewer_updated: c.viewer_updated,
+        target_updated: c.target_updated,
+        summary: c.summary || '',
+        analysis: c.analysis || '',
+        good: c.good || [],
+        warn: c.warn || [],
+        talk: c.talk || [],
+        ai: true,
+      });
+    }
+    res.json({ results, warning: null });
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: '저장된 분석을 불러오지 못했어요.' });
+  }
+});
+
 if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`✅ 서버 실행 중: http://localhost:${PORT}`);
