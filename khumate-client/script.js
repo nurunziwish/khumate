@@ -182,7 +182,7 @@ function onAuthChanged(session) {
   const id = currentUser?.id ?? null;
   if (id === loadedUserId) return;
   loadedUserId = id;
-  aiByUid.clear(); aiLatest = null; aiNote = ''; aiError = ''; savedAiLoaded = null;
+  aiByUid.clear(); aiLatest = null; aiNote = ''; aiError = ''; savedAiLoaded = null; aiBatchRank = null;
   loadPosts();
 }
 
@@ -280,8 +280,8 @@ function renderList() {
   // 내 글은 필터 줄 아래 별도 칸에 표시 (목록에는 넣지 않음)
   // 카드가 없으면 빈 내 매칭카드 모양을 띄우고, 그 아래 빨간 박스로 안내
   const blankPost = { user_id: currentUser?.id, status: 'draft', blank: true, title: '아직 작성한 카드가 없어요', gender: '', dorm_period: '', dept: '', student_id: '', birth_year: '' };
-  mineBox.innerHTML = myPost ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="khu-grad-border">${cardHtml(myPost)}</div>`
-    : currentUser ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="khu-grad-border">${cardHtml(blankPost)}</div><div class="mt-2">${bannerHtml('내 매칭카드를 완성하고 게시하여 매칭에 참여하세요.', openBtn)}</div>` : '';
+  mineBox.innerHTML = myPost ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="rounded-2xl shadow-lg">${cardHtml(myPost)}</div>`
+    : currentUser ? `<p class="khu-grad-text text-xs font-black mb-1.5 px-1">✦ 내 매칭 카드</p><div class="rounded-2xl shadow-lg">${cardHtml(blankPost)}</div><div class="mt-2">${bannerHtml('내 매칭카드를 완성하고 게시하여 매칭에 참여하세요.', openBtn)}</div>` : '';
 
   const parts = [];
   if (listState.mode === 'matched') {
@@ -299,7 +299,7 @@ function renderList() {
     parts.push(bannerHtml(`${text} (카드를 누르면 답안을 볼 수 있어요)`));
     parts.push(...(rows.length
       ? rows.map(r => r.post.user_id === currentUser?.id
-          ? `<div class="khu-grad-border">${cardHtml(r.post, null, false, true)}</div>`
+          ? `<div class="rounded-2xl shadow-lg">${cardHtml(r.post, null, false, true)}</div>`
           : cardHtml(r.post, r.match))
       : ['<p class="text-center text-sm text-slate-400 py-10">아직 같은 조건의 글이 없어요. 조금만 기다려 주세요!</p>']));
   } else {
@@ -483,7 +483,7 @@ async function openViewModal(userId) {
   const ai = currentUser ? aiByUid.get(row.user_id) : null;
   const aiBox = document.getElementById('view-ai');
   const aiOld = ai && currentUser && myPost && row.user_id !== currentUser.id && aiState(row.user_id, row.updated_at) === 'stale';
-  aiBox.innerHTML = ai ? (aiOld ? '<p class="text-[11px] text-amber-600 font-bold px-1">⚠ 카드가 바뀌기 전 기준으로 분석한 결과예요. 다시 분석해 보세요.</p>' : '') + aiBoxHtml(ai) : '';
+  aiBox.innerHTML = ai ? (aiOld ? '<p class="text-[11px] text-rose-600 font-bold px-1">⚠ 카드가 바뀌기 전 기준으로 분석한 결과예요. 다시 분석해 보세요.</p>' : '') + aiBoxHtml(ai) : '';
   aiBox.classList.toggle('hidden', !ai);
   // 내 카드가 있고 남의 카드면 항목별 비교를 같이 보여 줌
   // 점수 설명: 각 질문 칸 바로 아래에 붙이고, 칸을 찾지 못한 항목만 아래 비교표에 남김
@@ -574,6 +574,7 @@ document.addEventListener('keydown', e => {
 // 목록 정렬은 규칙 점수로 전체가 즉시 됩니다. 'AI 정밀 분석' 버튼을 누르면 팝업이 열리고,
 // 상위 20명을 AI가 한 번에 읽어 규칙 점수를 ±10점 보정하고 설명을 붙입니다.
 // 결과는 팝업의 순위 카드로 보여 주고, 같은 쌍은 서버 DB에 저장되어 다시 AI를 부르지 않아요.
+let aiBatchRank = null;  // 마지막 전체 분석 때 카드별 순위 (Map: 카드 id → 순위). 순위가 바뀌면 다시 분석 가능
 let aiLatest = null;   // 마지막 분석 결과 (최종 점수 순 정렬 전 원본), 아직 없으면 null
 let aiNote = '';       // 마지막 분석의 안내 문구 (예: AI 설정이 없음)
 let aiError = '';      // 마지막 분석 실패 메시지
@@ -597,7 +598,12 @@ function renderAiModal() {
   const n = cands.length;
   info.textContent = `같은 성별·거주 기간 관련도 상위 ${n}명 대상`;
   // 전원이 '분석 완료(바뀐 것 없음)'이면 버튼을 회색으로 막음
-  const allDone = n > 0 && cands.every(x => aiState(x.post.user_id, x.post.updated_at) === 'done');
+  const curIds = cands.map(x => x.post.user_id);
+  // 분석 때 순위와 지금 순위가 하나라도 다르면 '관련도 순서가 바뀜' (카드가 빠지거나 새로 들어와도 순위가 밀림)
+  const rankChanged = !!aiBatchRank && [...aiBatchRank].some(([id, rk]) => curIds.indexOf(id) + 1 !== rk);
+  // 분석 때 없던 카드가 상위 목록에 들어온 경우 (예: 10명이던 목록에 11등이 추가)
+  const addedCount = aiBatchRank ? cands.filter(x => !aiBatchRank.has(x.post.user_id)).length : 0;
+  const allDone = n > 0 && !rankChanged && addedCount === 0 && cands.every(x => aiState(x.post.user_id, x.post.updated_at) === 'done');
   // 내 카드가 분석 뒤에 바뀌었으면 버튼 옆에 안내
   const myChanged = !!myPost && cands.some(x => {
     const r = aiByUid.get(x.post.user_id);
@@ -605,8 +611,9 @@ function renderAiModal() {
   });
   let mc = document.getElementById('ai-my-changed');
   if (!mc) { mc = document.createElement('span'); mc.id = 'ai-my-changed'; btn.parentElement.insertBefore(mc, btn); }
-  mc.className = myChanged ? 'text-[11px] font-bold text-amber-200 mr-2 self-center' : 'hidden';
-  mc.textContent = myChanged ? '⚠ 내 카드가 바뀌었어요' : '';
+  const msgs = [myChanged ? '⚠ 내 카드가 바뀌었어요' : '', rankChanged ? '⚠ 관련도 순서가 바뀌었어요' : '', addedCount ? `➕ 새 카드 ${addedCount}명이 추가됐어요` : ''].filter(Boolean);
+  mc.className = msgs.length ? 'text-[11px] font-black text-white bg-rose-700 px-2 py-0.5 rounded-md mr-2 self-center' : 'hidden';
+  mc.textContent = msgs.join(' · ');
   btn.disabled = aiRunning || n === 0 || allDone;
   btn.textContent = aiRunning ? '분석 중…' : allDone ? '✔ 분석 최신 상태' : aiLatest ? '🔄 다시 분석' : '▶ 분석 시작';
   body.innerHTML = aiBodyHtml(n);
@@ -637,7 +644,7 @@ function aiBodyHtml(n) {
   if (!aiLatest.length) {
     return `<p class="text-center text-sm text-slate-400 py-10">${esc(aiNote || '분석할 후보가 아직 없어요.')}</p>`;
   }
-  const note = aiNote ? `<p class="text-xs font-semibold text-amber-600 bg-amber-50 rounded-lg px-3 py-2">${esc(aiNote)}</p>` : '';
+  const note = aiNote ? `<p class="text-xs font-semibold text-rose-600 bg-rose-50 rounded-lg px-3 py-2">${esc(aiNote)}</p>` : '';
   return `${note}<p class="text-xs font-bold text-slate-500">AI 최종 점수 순 · ${aiLatest.length}명</p>` +
     aiLatest.map((r, i) => aiCardHtml(r, i + 1)).join('');
 }
@@ -671,7 +678,7 @@ function aiCardHtml(r, rank) {
       <div class="h-1.5 bg-slate-100 rounded-full overflow-hidden">
         <div class="h-full bg-gradient-to-r from-red-500 to-orange-400 rounded-full" style="width:${r.final}%"></div>
       </div>
-      ${targetChanged ? '<p class="text-[11px] font-bold text-amber-600">⚠ 이 카드가 바뀌었어요 (이전 분석 기준)</p>' : ''}
+      ${targetChanged ? '<p class="text-[11px] font-bold text-rose-600">⚠ 이 카드가 바뀌었어요 (이전 분석 기준)</p>' : ''}
       <p class="text-sm text-slate-700 leading-relaxed">${esc(r.summary)}</p>
       ${r.analysis ? `<p class="text-xs text-slate-600 leading-relaxed">${esc(r.analysis)}</p>` : ''}
       ${good || warn ? `<div class="flex flex-wrap gap-1.5">${good}${warn}</div>` : ''}
@@ -683,6 +690,7 @@ async function runAiMatch() {
   if (aiRunning || !currentUser) return;
   aiRunning = true;
   aiError = '';
+  const batchRank = new Map((listState?.ranked || []).slice(0, 20).map((x, i) => [x.post.user_id, i + 1]));
   renderAiModal();
   try {
     const { data } = await sb.auth.getSession();
@@ -695,6 +703,7 @@ async function runAiMatch() {
     const json = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(json.error || 'AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.');
     applyAiResults(json.results || [], json.warning || '');
+    aiBatchRank = batchRank;
   } catch (e) {
     console.error(e);
     aiError = e.message || 'AI 분석에 실패했어요. 잠시 후 다시 시도해 주세요.';
@@ -718,6 +727,7 @@ function loadSavedAi() {
       if (!res.ok) throw new Error(json.error || 'saved failed');
       const list = json.results || [];
       list.forEach(r => aiByUid.set(r.user_id, r));
+      if ((json.batch_ranks || []).length) aiBatchRank = new Map(json.batch_ranks.map(x => [x.user_id, x.batch_rank]));
       if (!aiLatest && list.length) applyAiResults(list, '');
       if (viewRowCtx && !document.getElementById('view-modal').classList.contains('hidden')) refreshViewAi();
       if (!document.getElementById('ai-modal').classList.contains('hidden')) renderAiModal();
@@ -735,7 +745,7 @@ function refreshViewAi() {
   const ai = currentUser ? aiByUid.get(row.user_id) : null;
   const aiBox = document.getElementById('view-ai');
   const stale = !!ai && !!currentUser && !!myPost && row.user_id !== currentUser.id && aiState(row.user_id, row.updated_at) === 'stale';
-  aiBox.innerHTML = ai ? (stale ? '<p class="text-[11px] text-amber-600 font-bold px-1">⚠ 카드가 바뀌기 전 기준으로 분석한 결과예요. 다시 분석해 보세요.</p>' : '') + aiBoxHtml(ai) : '';
+  aiBox.innerHTML = ai ? (stale ? '<p class="text-[11px] text-rose-600 font-bold px-1">⚠ 카드가 바뀌기 전 기준으로 분석한 결과예요. 다시 분석해 보세요.</p>' : '') + aiBoxHtml(ai) : '';
   aiBox.classList.toggle('hidden', !ai);
   renderViewAiFooter();
 }
@@ -759,7 +769,7 @@ function renderViewAiFooter() {
   const done = st === 'done';
   const btnCls = done ? 'bg-slate-300 text-slate-600 cursor-not-allowed' : 'bg-gradient-to-r from-red-600 to-orange-500 hover:shadow-lg text-white';
   const label = done ? '✔ 분석 완료 (카드 변경 없음)' : '🤖 AI 정밀 분석';
-  footer.innerHTML = `${st === 'stale' ? '<p class="text-xs font-bold text-amber-600 text-center mb-2">⚠ 카드 내용이 바뀌었어요. 다시 분석할 수 있어요.</p>' : ''}
+  footer.innerHTML = `${st === 'stale' ? '<p class="text-xs font-bold text-rose-600 text-center mb-2">⚠ 카드 내용이 바뀌었어요. 다시 분석할 수 있어요.</p>' : ''}
     <button id="view-ai-btn" onclick="runSingleAi('${esc(row.user_id)}', ${sameCond})" class="w-full py-3 ${btnCls} font-bold rounded-xl shadow-sm transition">${label}</button>`;
   footer.classList.remove('hidden');
 }
@@ -1035,7 +1045,7 @@ function compareHtml(mine, theirs) {
   return compareRowsHtml(rows, matchScore(mine, theirs));
 }
 function compareRowsHtml(rows, ms) {
-  const tone = t => t.startsWith('범위 안') ? 'text-emerald-600 font-bold' : t.startsWith('범위 밖') ? 'text-amber-600 font-bold' : 'text-slate-400';
+  const tone = t => t.startsWith('범위 안') ? 'text-emerald-600 font-bold' : t.startsWith('범위 밖') ? 'text-rose-600 font-bold' : 'text-slate-400';
   return `
     <div class="rounded-xl border border-slate-200 bg-white p-4 text-xs leading-relaxed space-y-2">
       <p class="font-bold text-slate-800">🔍 내 카드와 비교 <span class="font-normal text-slate-500">${ms ? `· 규칙 점수 ${ms.score}점` : ''}</span></p>
@@ -1052,12 +1062,12 @@ function aiBoxHtml(ai) {
   const adj = ai.adjust > 0 ? `+${ai.adjust}` : `${ai.adjust}`;
   return `
     <div class="bg-red-50/60 border border-red-100 text-slate-700 rounded-xl p-4 text-xs leading-relaxed space-y-2">
-      <p class="font-bold text-red-600">🤖 AI 분석 <span class="font-black text-slate-900">· 규칙 ${ai.rule_score}점 → AI 보정 ${adj} → 최종 ${ai.final}점</span></p>
+      <p class="font-bold text-red-600">🤖 AI 분석 <span class="font-bold">· 규칙 ${ai.rule_score}점 → AI 보정 ${adj} → 최종 ${ai.final}점</span></p>
       <p>${esc(ai.summary)}</p>
       ${ai.analysis ? `<p class="text-slate-600">${esc(ai.analysis)}</p>` : ''}
-      ${ai.good?.length ? `<p class="font-bold text-slate-900"><span class="text-emerald-600 font-bold">✔ 잘 맞는 점</span> ${ai.good.map(esc).join(' · ')}</p>` : ''}
-      ${ai.warn?.length ? `<p class="font-bold text-slate-900"><span class="text-amber-600 font-bold">⚠ 확인해 보세요</span> ${ai.warn.map(esc).join(' · ')}</p>` : ''}
-      ${ai.talk?.length ? `<p class="font-bold text-slate-900"><span class="text-red-600 font-bold">💬 맞춰 볼 것</span> ${ai.talk.map(esc).join(' · ')}</p>` : ''}
+      ${ai.good?.length ? `<p class="font-bold"><span class="text-emerald-600 font-bold">✔ 잘 맞는 점</span> ${ai.good.map(esc).join(' · ')}</p>` : ''}
+      ${ai.warn?.length ? `<p class="font-bold"><span class="text-rose-600 font-bold">⚠ 확인해 보세요</span> ${ai.warn.map(esc).join(' · ')}</p>` : ''}
+      ${ai.talk?.length ? `<p class="font-bold"><span class="text-red-600 font-bold">💬 맞춰 볼 것</span> ${ai.talk.map(esc).join(' · ')}</p>` : ''}
     </div>`;
 }
 

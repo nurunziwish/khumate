@@ -119,6 +119,14 @@ app.post('/api/match-ai', async (req, res) => {
       }
     }
 
+    // 7-1) 상위 목록 전체 분석이면, 이번 순위를 저장 (분석 결과가 있는 카드만). 개별 카드 분석은 순위를 건드리지 않음
+    if (!targetId) {
+      await sb.from('match_ai').update({ batch_rank: null }).eq('viewer_id', uid);
+      await Promise.all(top.map((r, idx) => fresh.has(r.post.user_id)
+        ? sb.from('match_ai').update({ batch_rank: idx + 1 }).eq('viewer_id', uid).eq('target_id', r.post.user_id)
+        : null));
+    }
+
         // 6) 결과: AI 분석이 있으면 규칙 점수 + AI 보정, 없으면 규칙 점수만 (목록은 항상 표시)
     const results = top.map(r => {
       const c = fresh.get(r.post.user_id);
@@ -165,13 +173,17 @@ app.get('/api/match-ai/saved', async (req, res) => {
     const uid = userData.user.id;
 
     const { data: me } = await sb.from('roommate_posts').select('*').eq('user_id', uid).maybeSingle();
-    if (!me || (me.schema_version ?? 0) < SCHEMA_VERSION) return res.json({ results: [], warning: null });
+    // 마지막 전체 분석 때의 순위 (카드가 빠져도 순서 변화를 알 수 있도록 전체를 읽음)
+    const { data: rankedRows } = await sb.from('match_ai').select('target_id,batch_rank')
+      .eq('viewer_id', uid).not('batch_rank', 'is', null);
+    const batch_ranks = (rankedRows || []).map(x => ({ user_id: x.target_id, batch_rank: x.batch_rank }));
+    if (!me || (me.schema_version ?? 0) < SCHEMA_VERSION) return res.json({ results: [], warning: null, batch_ranks });
 
     const { data: candidates } = await sb.from('roommate_posts').select('*')
       .eq('gender', me.gender).eq('dorm_period', me.dorm_period)
       .gte('schema_version', SCHEMA_VERSION).neq('user_id', uid).limit(500);
     const top = matching.rankMatches(me, candidates || [], SCHEMA_VERSION).slice(0, TOP_N);
-    if (!top.length) return res.json({ results: [], warning: null });
+    if (!top.length) return res.json({ results: [], warning: null, batch_ranks });
 
     const byId = new Map(top.map(r => [r.post.user_id, r]));
     const { data: cached } = await sb.from('match_ai').select('*')
@@ -195,7 +207,7 @@ app.get('/api/match-ai/saved', async (req, res) => {
         ai: true,
       });
     }
-    res.json({ results, warning: null });
+    res.json({ results, warning: null, batch_ranks });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: '저장된 분석을 불러오지 못했어요.' });
