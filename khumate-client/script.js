@@ -299,7 +299,7 @@ function renderList() {
     parts.push(bannerHtml(`${text} (카드를 누르면 답안을 볼 수 있어요)`));
     parts.push(...(rows.length
       ? rows.map(r => r.post.user_id === currentUser?.id
-          ? `<div class="khu-grad-shadow">${cardHtml(r.post, null, false, true)}</div>`
+          ? cardHtml(r.post, null, false, true)
           : cardHtml(r.post, r.match))
       : ['<p class="text-center text-sm text-slate-400 py-10">아직 같은 조건의 글이 없어요. 조금만 기다려 주세요!</p>']));
   } else {
@@ -610,10 +610,12 @@ function renderAiModal() {
     return !!r && !!r.viewer_updated && new Date(r.viewer_updated).getTime() !== new Date(myPost.updated_at).getTime();
   });
   const msgs = [myChanged ? '⚠ 내 카드가 바뀌었어요' : '', rankChanged ? '⚠ 관련도 순서가 바뀌었어요' : '', addedCount ? `➕ 새 카드 ${addedCount}명이 추가됐어요` : ''].filter(Boolean);
-  const notesHtml = msgs.length ? `<div class="space-y-1 mb-3">${msgs.map(m => `<p class="text-xs font-bold text-rose-600">${m}</p>`).join('')}</div>` : '';
+  // 안내 문구: 버튼 왼쪽 흰 줄에 한 줄씩 (왼쪽 정렬)
+  const notesEl = document.getElementById('ai-notes');
+  if (notesEl) notesEl.innerHTML = msgs.map(m => `<p class="text-xs font-bold text-rose-600 leading-snug">${m}</p>`).join('');
   btn.disabled = aiRunning || n === 0 || allDone;
   btn.textContent = aiRunning ? '분석 중…' : allDone ? '✔ 분석 최신 상태' : aiLatest ? '🔄 다시 분석' : '▶ 분석 시작';
-  body.innerHTML = notesHtml + aiBodyHtml(n);
+  body.innerHTML = aiBodyHtml(n);
 }
 
 function aiBodyHtml(n) {
