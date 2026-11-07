@@ -236,7 +236,6 @@ const HOUSE_GROUPS = [
   { title: '생활 리듬', items: [
     { kind: 'pair', names: ['wake_time', 'sleep_time'], label: '기상 시간 · 취침 시간' },
     { kind: 'pair', names: ['shower_time'], label: '샤워 시간' },
-    { kind: 'select', name: 'shower_duration', label: '샤워 소요 시간' },
   ] },
   { title: '환경 및 생활 방식', items: [
     { kind: 'select', name: 'media_style', label: '미디어 시청 방식' },
@@ -393,11 +392,14 @@ async function renderHouseRule() {
     const show = (obj, n) => (obj[n] === undefined || obj[n] === null || obj[n] === '') ? '미응답' : esc(valueText(n, obj[n]));
     // 위쪽 카드: 기본 5개 정보만 + 카드 자세히 보기 (누르면 전체 카드 팝업)
     const basicCard = r => {
-      const items = [r.gender, r.dorm_period, r.dept, r.student_id ? `${r.student_id}학번` : '', r.birth_year ? `${r.birth_year}년생` : '']
-        .filter(Boolean);
+      const rows = [
+        [r.gender, r.dorm_period],
+        [r.student_id ? `${r.student_id}학번` : '', r.birth_year ? `${r.birth_year}년생` : ''],
+        [r.dept],
+      ];
       return `<div class="flex flex-col flex-1 m-3 p-4 rounded-2xl bg-slate-50 border border-slate-200">
-        <div class="flex flex-wrap gap-1.5 text-xs font-semibold text-slate-700">
-          ${items.map(t => `<span class="px-2 py-0.5 bg-slate-100 rounded">${esc(t)}</span>`).join('')}
+        <div class="flex flex-col gap-1.5 text-xs font-semibold text-slate-700">
+          ${rows.map(row => `<div class="flex flex-wrap gap-1.5">${row.filter(Boolean).map(t => `<span class="px-2 py-0.5 bg-slate-100 rounded">${esc(t)}</span>`).join('')}</div>`).join('')}
         </div>
         <button onclick="openViewModal('${esc(r.owner_id)}')" class="mt-auto pt-4 w-full py-2 rounded-xl bg-white border border-red-200 text-xs font-bold text-red-600 hover:bg-red-50 transition">카드 자세히 보기 →</button>
       </div>`;
@@ -411,7 +413,6 @@ async function renderHouseRule() {
 
     const itemHtml = it => {
       if (it.kind === 'pair') {
-        const line = obj => it.names.map(n => `${HOUSE_PAIR_LABEL[n]} ${show(obj, n)}`).join(' · ');
         // 아래 선택기: 카드와 같은 시간 범위·샤워 서식 (합의 답으로 저장됨)
         const pickers = it.names.map(n => {
           if (n === 'shower_time') {
@@ -434,8 +435,7 @@ async function renderHouseRule() {
         }).join('');
         return `<div>
           <p class="text-xs font-bold text-slate-600 mb-1.5">${esc(it.label)}</p>
-          <div class="grid grid-cols-2 gap-2">${houseCellHtml('나', line(mine))}${houseCellHtml('룸메', line(theirs))}</div>
-          <div class="mt-3 space-y-3">${pickers}</div>
+          <div class="space-y-3">${pickers}</div>
         </div>`;
       }
       // 저장된 답이 있으면 그 답, 없으면 자동 합의 답. 저장된 답이 생기면 '협의' 표시는 접음
