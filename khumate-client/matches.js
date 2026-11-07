@@ -268,11 +268,62 @@ function houseFieldDef(name) {
   return found;
 }
 
-function houseSelectHtml(name) {
+// 답 선택지만 보여 주는 드롭다운 (다른 서식과 같은 comboHtml 사용)
+function houseSelectHtml(name, value = '') {
   const def = houseFieldDef(name);
-  const opts = (def?.options || []).map(op => `<option value="${esc(op.value)}">${esc(op.label)}</option>`).join('');
-  return `<select data-house="${esc(name)}" class="w-full appearance-none rounded-xl border border-orange-100 bg-gradient-to-r from-red-50 via-white to-orange-50 px-3 py-2.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-300">
-    <option value="">선택해 주세요</option>${opts}</select>`;
+  return comboHtml({ name: '', options: def?.options || [], value, placeholder: '선택해 주세요', hiddenAttr: `data-house="${esc(name)}"` });
+}
+
+// 저장 / 실시간 공유 (house_rule_items: 칸 하나당 한 줄)
+let houseMatchId = null, houseChannel = null, houseChannelMatch = null;
+
+async function fetchHouseItems(matchId) {
+  const { data, error } = await sb.from('house_rule_items').select('field, answer').eq('match_id', matchId);
+  if (error) throw error;
+  return Object.fromEntries((data || []).map(r => [r.field, r.answer]));
+}
+
+async function saveHouseItem(matchId, field, answer) {
+  if (!answer || !currentUser) return;
+  try {
+    const { error } = await sb.from('house_rule_items').upsert(
+      { match_id: matchId, field, answer, updated_by: currentUser.id, updated_at: new Date().toISOString() },
+      { onConflict: 'match_id,field' });
+    if (error) throw error;
+  } catch (e) {
+    console.error('[matches] 하우스룰 저장 실패:', e.message);
+    khuAlert('저장하지 못했어요. 잠시 후 다시 시도해 주세요.');
+  }
+  renderHouseRule();
+}
+
+// 드롭다운을 고르면 저장 (이벤트 위임: 다시 그려져도 동작)
+document.addEventListener('change', e => {
+  if (!e.target.classList?.contains('khu-combo-input')) return;
+  const hidden = e.target.closest('.khu-combo')?.querySelector('input[data-house]');
+  if (!hidden || !houseMatchId) return;
+  saveHouseItem(houseMatchId, hidden.dataset.house, hidden.value);
+});
+
+// 자동 합의 답안
+// 허용 범위(rm_*)의 가장 높은 단계 = 그 칸에서 받아 줄 수 있는 마지막 단계 (상관없음 = 마지막)
+// 합의 답 = 두 사람의 허용 범위 중 더 좁은 쪽의 단계 (둘 다 받아 줄 수 있는 가장 넓은 답)
+// 한쪽의 답이 상대의 허용 범위를 넘으면 '협의가 필요해요'를 남김
+function houseEval(name, mine, theirs) {
+  const def = houseFieldDef(name);
+  const list = (RM_OVERRIDE[name]?.options || def?.options || []).map(op => op.value);
+  const idx = v => (v === undefined || v === null || v === '') ? -1 : list.indexOf(v);
+  const tolMax = t => {
+    if (t === 'any') return list.length - 1;
+    const vals = [].concat(t ?? []).filter(Boolean);
+    if (!vals.length) return -1;
+    return Math.max(...vals.map(v => v === 'any' ? list.length - 1 : list.indexOf(v)));
+  };
+  const myA = idx(mine[name]), theirA = idx(theirs[name]);
+  const myT = tolMax(mine['rm_' + name]), theirT = tolMax(theirs['rm_' + name]);
+  if (myA < 0 || theirA < 0 || myT < 0 || theirT < 0) return { value: '', conflict: false };
+  const agreed = Math.min(myT, theirT);
+  return { value: list[agreed], conflict: myA > theirT || theirA > myT };
 }
 
 function houseCellHtml(tag, text) {
@@ -292,6 +343,20 @@ async function renderHouseRule() {
       return;
     }
     const snaps = await fetchSnapshots(m.id);
+    let saved = {};
+    try { saved = await fetchHouseItems(m.id); }
+    catch (e) { console.warn('[matches] 하우스룰 답 불러오기 실패 (SQL 실행 여부 확인):', e.message); }
+    houseMatchId = m.id;
+    // 상대가 고치면 바로 반영되도록 구독 (같은 신청이면 한 번만)
+    if (houseChannelMatch !== m.id) {
+      if (houseChannel) sb.removeChannel(houseChannel);
+      houseChannelMatch = m.id;
+      try {
+        houseChannel = sb.channel('house-rule-' + m.id).on('postgres_changes',
+          { event: '*', schema: 'public', table: 'house_rule_items', filter: `match_id=eq.${m.id}` },
+          () => renderHouseRule()).subscribe();
+      } catch (e) { console.warn('[matches] 실시간 구독 실패:', e.message); }
+    }
     snaps.forEach(r => snapshotCache.set(r.owner_id, r));
     const mineRow = snaps.find(r => r.owner_id === currentUser.id);
     const partnerRow = snaps.find(r => r.owner_id !== currentUser.id);
@@ -302,7 +367,23 @@ async function renderHouseRule() {
     const mine = { gender: mineRow.gender, dorm_period: mineRow.dorm_period, ...(mineRow.answers || {}) };
     const theirs = { gender: partnerRow.gender, dorm_period: partnerRow.dorm_period, ...(partnerRow.answers || {}) };
     const show = (obj, n) => (obj[n] === undefined || obj[n] === null || obj[n] === '') ? '미응답' : esc(valueText(n, obj[n]));
-    const asCard = r => cardHtml({ ...r, user_id: r.owner_id }, null, true);
+    // 위쪽 카드: 기본 5개 정보만 + 카드 자세히 보기 (누르면 전체 카드 팝업)
+    const basicCard = r => {
+      const items = [r.gender, r.dorm_period, r.dept, r.student_id ? `${r.student_id}학번` : '', r.birth_year ? `${r.birth_year}년생` : '']
+        .filter(Boolean);
+      return `<div class="flex flex-col h-full p-4">
+        <div class="flex flex-wrap gap-1.5 text-xs font-semibold text-slate-700">
+          ${items.map(t => `<span class="px-2 py-0.5 bg-slate-100 rounded">${esc(t)}</span>`).join('')}
+        </div>
+        <button onclick="openViewModal('${esc(r.owner_id)}')" class="mt-auto pt-3 text-left text-xs font-bold text-red-600 hover:underline">카드 자세히 보기 →</button>
+      </div>`;
+    };
+    const topBox = (title, r) => `<div class="rounded-3xl bg-white border border-orange-100 shadow-sm overflow-hidden min-w-0">
+        <div class="px-4 py-2.5 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400 text-white">
+          <p class="text-sm font-black">${title}</p>
+        </div>
+        ${basicCard(r)}
+      </div>`;
 
     const itemHtml = it => {
       if (it.kind === 'pair') {
@@ -312,24 +393,21 @@ async function renderHouseRule() {
           <div class="grid grid-cols-2 gap-2">${houseCellHtml('나', line(mine))}${houseCellHtml('룸메', line(theirs))}</div>
         </div>`;
       }
+      // 저장된 답이 있으면 그 답, 없으면 자동 합의 답. 저장된 답이 생기면 '협의' 표시는 접음
+      const r = houseEval(it.name, mine, theirs);
+      const hasSaved = saved[it.name] !== undefined;
       return `<div>
         <p class="text-xs font-bold text-slate-600 mb-1.5">${esc(it.label)}</p>
-        ${houseSelectHtml(it.name)}
+        ${houseSelectHtml(it.name, hasSaved ? saved[it.name] : r.value)}
+        ${r.conflict && !hasSaved ? '<p class="text-[11px] font-bold text-rose-500 mt-1.5 px-0.5">협의가 필요해요</p>' : ''}
       </div>`;
     };
 
     box.innerHTML = `
       <div class="space-y-5 text-left">
-        <div class="text-center">
-          <p class="text-xs font-black khu-grad-text">룸메 확정</p>
-          <p class="text-xs text-slate-500 mt-1">확정 당시의 카드예요. 카드를 고치면 여기도 함께 바뀌어요.</p>
-        </div>
-        <div>
-          <p class="text-xs font-black khu-grad-text text-center mb-2">확정 카드</p>
-          <div class="grid grid-cols-2 gap-3 items-start">
-            <div class="min-w-0"><p class="text-[11px] font-bold text-slate-500 mb-1">내 카드</p>${asCard(mineRow)}</div>
-            <div class="min-w-0"><p class="text-[11px] font-bold text-slate-500 mb-1">룸메 카드</p>${asCard(partnerRow)}</div>
-          </div>
+        <div class="grid grid-cols-2 gap-3 items-stretch">
+          ${topBox('내 카드', mineRow)}
+          ${topBox('룸메 카드', partnerRow)}
         </div>
         ${HOUSE_GROUPS.map(g => `
           <div class="rounded-3xl bg-white border border-orange-100 shadow-sm overflow-hidden">
