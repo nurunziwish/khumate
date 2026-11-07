@@ -371,14 +371,14 @@ async function renderHouseRule() {
     const basicCard = r => {
       const items = [r.gender, r.dorm_period, r.dept, r.student_id ? `${r.student_id}학번` : '', r.birth_year ? `${r.birth_year}년생` : '']
         .filter(Boolean);
-      return `<div class="flex flex-col h-full p-4">
+      return `<div class="flex flex-col flex-1 m-3 p-4 rounded-2xl bg-slate-50 border border-slate-200">
         <div class="flex flex-wrap gap-1.5 text-xs font-semibold text-slate-700">
           ${items.map(t => `<span class="px-2 py-0.5 bg-slate-100 rounded">${esc(t)}</span>`).join('')}
         </div>
-        <button onclick="openViewModal('${esc(r.owner_id)}')" class="mt-auto pt-3 text-left text-xs font-bold text-red-600 hover:underline">카드 자세히 보기 →</button>
+        <button onclick="openViewModal('${esc(r.owner_id)}')" class="mt-auto pt-4 w-full py-2 rounded-xl bg-white border border-red-200 text-xs font-bold text-red-600 hover:bg-red-50 transition">카드 자세히 보기 →</button>
       </div>`;
     };
-    const topBox = (title, r) => `<div class="rounded-3xl bg-white border border-orange-100 shadow-sm overflow-hidden min-w-0">
+    const topBox = (title, r) => `<div class="flex flex-col rounded-3xl bg-white border border-orange-100 shadow-sm overflow-hidden min-w-0">
         <div class="px-4 py-2.5 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400 text-white">
           <p class="text-sm font-black">${title}</p>
         </div>
@@ -404,21 +404,24 @@ async function renderHouseRule() {
     };
 
     box.innerHTML = `
-      <div class="space-y-5 text-left">
+      <style>
+        /* 하우스룰 드롭다운: 선택된 답 칸만 옅은 그라데이션 (목록은 흰색 그대로) */
+        .khu-house .khu-combo-input { background: linear-gradient(to right, #fef2f2, #ffffff 55%, #fff7ed) !important; }
+      </style>
+      <div class="space-y-5 text-left khu-house">
+        <!-- 맨 위: 룸메 확정 해제 (눈에 띄게, 누르면 확인 팝업) -->
+        <button onclick="onReleaseMatch(${Number(m.id)})" class="w-full py-3 rounded-2xl border-2 border-red-500 bg-white text-red-600 text-sm font-black shadow-sm hover:bg-red-50 transition">⚠ 룸메 확정 해제</button>
         <div class="grid grid-cols-2 gap-3 items-stretch">
           ${topBox('내 카드', mineRow)}
           ${topBox('룸메 카드', partnerRow)}
         </div>
         ${HOUSE_GROUPS.map(g => `
-          <div class="rounded-3xl bg-white border border-orange-100 shadow-sm overflow-hidden">
-            <div class="px-4 py-2.5 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400 text-white">
+          <div class="rounded-3xl bg-white border border-orange-100 shadow-sm">
+            <div class="px-4 py-2.5 rounded-t-3xl bg-gradient-to-r from-red-600 via-rose-500 to-orange-400 text-white">
               <p class="text-sm font-black">${esc(g.title)}</p>
             </div>
             <div class="p-4 space-y-4">${g.items.map(itemHtml).join('')}</div>
           </div>`).join('')}
-        <div class="pt-2 text-center">
-          <button onclick="onReleaseMatch(${Number(m.id)})" class="text-xs text-slate-500 underline hover:text-red-600">룸메 확정 해제</button>
-        </div>
       </div>`;
   } catch (e) {
     console.error('[matches] 하우스룰 실패:', e.message);
