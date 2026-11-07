@@ -421,8 +421,8 @@ async function renderHouseRule() {
     // 항목 카드: 항목마다 흰 카드 하나로 분리. 제목 앞 그라데이션 막대로 구분
     const CARD = 'rounded-2xl bg-white border border-slate-200 shadow-sm p-4 space-y-3.5';
     const titleHtml = t => `<div class="flex items-center gap-2"><span class="w-1 h-4 rounded-full bg-gradient-to-b from-red-500 to-orange-400"></span><p class="text-sm font-black text-slate-900">${esc(t)}</p></div>`;
-    // 나 칸은 옅은 그라데이션, 룸메이트 칸은 회색 (한눈에 구분)
-    const sideCell = (mine, inner) => `<div class="rounded-xl p-2.5 ${mine ? 'bg-gradient-to-br from-red-50 to-orange-50 border border-orange-100' : 'bg-slate-50 border border-slate-200'}">${inner}</div>`;
+    // 나 / 룸메이트 / 허용 범위 칸은 배경을 밝은 회색으로 통일
+    const sideCell = (mine, inner) => `<div class="rounded-xl p-2.5 bg-slate-50 border border-slate-200">${inner}</div>`;
     const sideTag = (t, mine) => `<p class="text-[11px] font-black mb-1.5 ${mine ? 'text-red-600' : 'text-slate-500'}">${t}</p>`;
 
     // 생활 리듬: 숙면 시간 / 샤워 시간 각각 나 | 룸메이트 두 칸 (각자 칸만 수정)
@@ -490,7 +490,7 @@ async function renderHouseRule() {
           ${sideCell(true, `${sideTag('나', true)}${houseSelectHtml(it.name, myVal, myKey)}`)}
           ${sideCell(false, `${sideTag('룸메이트', false)}<div class="pointer-events-none">${houseSelectHtml(it.name, theirVal, theirKey)}</div>`)}
         </div>
-        <div class="rounded-xl bg-gradient-to-r from-red-50/70 via-white to-orange-50/70 border border-orange-100 p-3">
+        <div class="rounded-xl p-2.5 bg-slate-50 border border-slate-200">
           <p class="text-[11px] font-black text-red-600 mb-1.5">허용 범위</p>
           ${houseSelectHtml(it.name, hasSaved ? saved[it.name] : r.value)}
           ${r.conflict && !hasSaved ? '<p class="text-[11px] font-bold text-rose-500 mt-1.5">협의가 필요해요</p>' : ''}
