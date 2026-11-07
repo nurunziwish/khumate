@@ -234,8 +234,7 @@ async function fetchSnapshots(matchId) {
 // 2열(나·룸메)로 보이는 항목: 기상·취침, 샤워. 나머지는 드롭다운(답 선택지만)
 const HOUSE_GROUPS = [
   { title: '생활 리듬', items: [
-    { kind: 'pair', names: ['wake_time', 'sleep_time'], label: '기상 시간 · 취침 시간' },
-    { kind: 'pair', names: ['shower_time'], label: '샤워 시간' },
+    { kind: 'sides' },
   ] },
   { title: '환경 및 생활 방식', items: [
     { kind: 'select', name: 'media_style', label: '미디어 시청 방식' },
@@ -284,7 +283,7 @@ async function fetchHouseItems(matchId) {
 }
 
 async function saveHouseItem(matchId, field, answer) {
-  if (!answer || !currentUser) return;
+  if (answer === undefined || answer === null || !currentUser) return;
   try {
     const { error } = await sb.from('house_rule_items').upsert(
       { match_id: matchId, field, answer, updated_by: currentUser.id, updated_at: new Date().toISOString() },
@@ -318,8 +317,7 @@ document.addEventListener('change', e => {
   if (e.target.matches?.('input[data-house-multi]')) {
     const field = e.target.dataset.houseMulti;
     const vals = [...document.querySelectorAll(`input[data-house-multi="${field}"]:checked`)].map(el => el.value);
-    if (vals.length) saveHouseItem(houseMatchId, field, vals.join(','));
-    else renderHouseRule();
+    saveHouseItem(houseMatchId, field, vals.join(','));
   }
 });
 
@@ -411,33 +409,56 @@ async function renderHouseRule() {
         ${basicCard(r)}
       </div>`;
 
-    const itemHtml = it => {
-      if (it.kind === 'pair') {
-        // 아래 선택기: 카드와 같은 시간 범위·샤워 서식 (합의 답으로 저장됨)
-        const pickers = it.names.map(n => {
-          if (n === 'shower_time') {
-            const def = houseFieldDef(n);
-            const cur = (saved[n] || '').split(',').filter(Boolean);
-            return `<div>
-              <p class="text-[11px] font-bold text-slate-500 mb-1">합의 ${HOUSE_PAIR_LABEL[n]}</p>
-              <div class="flex gap-2" data-house-multi-wrap>${(def?.options || []).map(op => `
-                <label class="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-orange-100 bg-gradient-to-r from-red-50 via-white to-orange-50 text-xs font-bold text-slate-800 cursor-pointer">
-                  <input type="checkbox" data-house-multi="${esc(n)}" value="${esc(op.value)}" ${cur.includes(op.value) ? 'checked' : ''} class="accent-red-600">${esc(op.label)}
-                </label>`).join('')}</div>
-            </div>`;
-          }
-          const span = RM_OVERRIDE[n]?.span || [0, 23];
-          const cur = houseRangeValue(saved, n);
-          return `<div>
-            <p class="text-[11px] font-bold text-slate-500 mb-1">합의 ${HOUSE_PAIR_LABEL[n]} 시간</p>
-            <div data-house-range="${esc(n)}">${FIELD_RENDERERS.hourrange({ name: 'house_' + n, span, default: cur })}</div>
-          </div>`;
-        }).join('');
-        return `<div>
-          <p class="text-xs font-bold text-slate-600 mb-1.5">${esc(it.label)}</p>
-          <div class="space-y-3">${pickers}</div>
+    // 생활 리듬: 왼쪽 '나'(내가 수정), 오른쪽 '룸메이트'(룸메만 수정). 기본값은 각자 카드 답
+    // 저장 칸 이름은 '사람id:항목'이라 두 사람 답이 따로 저장됨
+    const sidesHtml = () => {
+      const k = (uid, n) => `${uid}:${n}`;
+      const sideCol = (uid, src, editable, title) => {
+        const rangeOf = n => {
+          const v = saved[k(uid, n)];
+          if (v !== undefined) { try { return JSON.parse(v); } catch (e) { /* 아래 기본값 */ } }
+          return src[n] && typeof src[n] === 'object' ? src[n] : null;
+        };
+        const timeBox = (n, lab, span) => `<div>
+          <p class="text-[11px] font-bold text-slate-500 mb-1">${lab}</p>
+          <div data-house-range="${esc(k(uid, n))}">${FIELD_RENDERERS.hourrange({ name: 'house_' + n + '_' + uid, span, default: rangeOf(n) })}</div>
         </div>`;
-      }
+        const showerVal = saved[k(uid, 'shower_time')] !== undefined
+          ? saved[k(uid, 'shower_time')].split(',').filter(Boolean)
+          : [].concat(src.shower_time ?? []);
+        const showerOpts = (houseFieldDef('shower_time')?.options || []).map(op => `
+          <label class="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-orange-100 bg-gradient-to-r from-red-50 via-white to-orange-50 text-xs font-bold text-slate-800 cursor-pointer">
+            <input type="checkbox" data-house-multi="${esc(k(uid, 'shower_time'))}" value="${esc(op.value)}" ${showerVal.includes(op.value) ? 'checked' : ''} class="accent-red-600">${esc(op.label)}
+          </label>`).join('');
+        const durVal = saved[k(uid, 'shower_duration')] ?? (src.shower_duration ?? '');
+        const durOpts = houseFieldDef('shower_duration')?.options || [];
+        return `<div class="min-w-0 space-y-3 ${editable ? '' : 'pointer-events-none'}">
+          <p class="text-xs font-black khu-grad-text text-center">${title}</p>
+          <div>
+            <p class="text-xs font-bold text-slate-600 mb-1.5">숙면 시간</p>
+            <div class="space-y-2">
+              ${timeBox('wake_time', '기상', [5, 12])}
+              ${timeBox('sleep_time', '취침', [21, 4])}
+            </div>
+          </div>
+          <div>
+            <p class="text-xs font-bold text-slate-600 mb-1.5">샤워 시간</p>
+            <div class="flex gap-2" data-house-multi-wrap>${showerOpts}</div>
+          </div>
+          <div>
+            <p class="text-xs font-bold text-slate-600 mb-1.5">소요 시간</p>
+            ${comboHtml({ name: '', options: durOpts, value: durVal, placeholder: '선택해 주세요', hiddenAttr: `data-house="${esc(k(uid, 'shower_duration'))}"` })}
+          </div>
+        </div>`;
+      };
+      return `<div class="grid grid-cols-2 gap-3 items-start">
+        ${sideCol(currentUser.id, mine, true, '나')}
+        ${sideCol(partnerRow.owner_id, theirs, false, '룸메이트')}
+      </div>`;
+    };
+
+    const itemHtml = it => {
+      if (it.kind === 'sides') return sidesHtml();
       // 저장된 답이 있으면 그 답, 없으면 자동 합의 답. 저장된 답이 생기면 '협의' 표시는 접음
       const r = houseEval(it.name, mine, theirs);
       const hasSaved = saved[it.name] !== undefined;
