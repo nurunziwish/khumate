@@ -305,12 +305,12 @@ document.addEventListener('change', e => {
     if (hidden) saveHouseItem(houseMatchId, hidden.dataset.house, hidden.value);
     return;
   }
-  // 시간 범위 (기상·취침): 시작·끝을 둘 다 고르면 저장
-  const range = e.target.closest?.('[data-house-range]');
-  if (range) {
-    const from = range.querySelector('input[data-part="from"]')?.value;
-    const to = range.querySelector('input[data-part="to"]')?.value;
-    if (from && to && from !== 'any' && to !== 'any') saveHouseItem(houseMatchId, range.dataset.houseRange, JSON.stringify({ from, to }));
+  // 시간 (기상·취침): 시와 분을 둘 다 고르면 HH:MM 으로 저장
+  const tbox = e.target.closest?.('[data-house-time]');
+  if (tbox) {
+    const h = tbox.querySelector('[data-part="h"]')?.value;
+    const m = tbox.querySelector('[data-part="m"]')?.value;
+    if (h && m) saveHouseItem(houseMatchId, tbox.dataset.houseTime, `${h}:${m}`);
     return;
   }
   // 샤워 시간대 (여러 개 고르기)
@@ -396,10 +396,10 @@ async function renderHouseRule() {
         [r.dept],
       ];
       return `<div class="flex flex-col flex-1 m-3 p-4 rounded-2xl bg-slate-50 border border-slate-200">
-        <div class="flex flex-col gap-1.5 text-xs font-semibold text-slate-700">
+        <div class="flex flex-col gap-1.5 text-xs font-semibold text-slate-700 mb-4">
           ${rows.map(row => `<div class="flex flex-wrap gap-1.5">${row.filter(Boolean).map(t => `<span class="px-2 py-0.5 bg-slate-100 rounded">${esc(t)}</span>`).join('')}</div>`).join('')}
         </div>
-        <button onclick="openViewModal('${esc(r.owner_id)}')" class="mt-auto pt-4 w-full py-2 rounded-xl bg-white border border-red-200 text-xs font-bold text-red-600 hover:bg-red-50 transition">카드 자세히 보기 →</button>
+        <button onclick="openViewModal('${esc(r.owner_id)}')" class="mt-auto w-full py-2.5 flex items-center justify-center rounded-xl bg-white border border-red-200 text-xs font-bold leading-none text-red-600 hover:bg-red-50 transition">카드 자세히 보기 →</button>
       </div>`;
     };
     const topBox = (title, r) => `<div class="flex flex-col rounded-3xl bg-white border border-orange-100 shadow-sm overflow-hidden min-w-0">
@@ -414,15 +414,15 @@ async function renderHouseRule() {
     const sidesHtml = () => {
       const k = (uid, n) => `${uid}:${n}`;
       const sideCol = (uid, src, editable, title) => {
-        const rangeOf = n => {
+        // 기본값 = 각자 카드의 시간(HH:MM), 저장된 답이 있으면 그 답
+        const timeOf = n => {
           const v = saved[k(uid, n)];
-          if (v !== undefined) { try { return JSON.parse(v); } catch (e) { /* 아래 기본값 */ } }
-          return src[n] && typeof src[n] === 'object' ? src[n] : null;
+          return (v !== undefined && !String(v).startsWith('{')) ? v : String(src[n] ?? '');
         };
-        const timeBox = (n, lab, span) => `<div>
-          <p class="text-[11px] font-bold text-slate-500 mb-1">${lab}</p>
-          <div data-house-range="${esc(k(uid, n))}">${FIELD_RENDERERS.hourrange({ name: 'house_' + n + '_' + uid, span, default: rangeOf(n) })}</div>
-        </div>`;
+        const timeBox = (n, lab, span) => `<div class="flex-1 min-w-0">
+            <p class="text-[11px] font-bold text-slate-500 mb-1 text-center">${lab}</p>
+            <div data-house-time="${esc(k(uid, n))}">${FIELD_RENDERERS.time({ name: 'house_' + n + '_' + uid, span, default: timeOf(n) })}</div>
+          </div>`;
         const showerVal = saved[k(uid, 'shower_time')] !== undefined
           ? saved[k(uid, 'shower_time')].split(',').filter(Boolean)
           : [].concat(src.shower_time ?? []);
@@ -430,24 +430,24 @@ async function renderHouseRule() {
           <label class="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-orange-100 bg-gradient-to-r from-red-50 via-white to-orange-50 text-xs font-bold text-slate-800 cursor-pointer">
             <input type="checkbox" data-house-multi="${esc(k(uid, 'shower_time'))}" value="${esc(op.value)}" ${showerVal.includes(op.value) ? 'checked' : ''} class="accent-red-600">${esc(op.label)}
           </label>`).join('');
-        const durVal = saved[k(uid, 'shower_duration')] ?? (src.shower_duration ?? '');
+        const durVal = String(saved[k(uid, 'shower_duration')] ?? src.shower_duration ?? '');
         const durOpts = houseFieldDef('shower_duration')?.options || [];
-        return `<div class="min-w-0 space-y-3 ${editable ? '' : 'pointer-events-none'}">
-          <p class="text-xs font-black khu-grad-text text-center">${title}</p>
+        return `<div class="min-w-0 space-y-4 ${editable ? '' : 'pointer-events-none'}">
+          <div class="text-center">
+            <span class="inline-block px-4 py-1.5 rounded-full bg-gradient-to-r from-red-600 via-rose-500 to-orange-400 text-white text-sm font-black shadow-sm">${title}</span>
+          </div>
           <div>
             <p class="text-xs font-bold text-slate-600 mb-1.5">숙면 시간</p>
-            <div class="space-y-2">
+            <div class="flex items-end gap-1.5">
               ${timeBox('wake_time', '기상', [5, 12])}
+              <span class="pb-2.5 font-black text-slate-400">~</span>
               ${timeBox('sleep_time', '취침', [21, 4])}
             </div>
           </div>
           <div>
             <p class="text-xs font-bold text-slate-600 mb-1.5">샤워 시간</p>
             <div class="flex gap-2" data-house-multi-wrap>${showerOpts}</div>
-          </div>
-          <div>
-            <p class="text-xs font-bold text-slate-600 mb-1.5">소요 시간</p>
-            ${comboHtml({ name: '', options: durOpts, value: durVal, placeholder: '선택해 주세요', hiddenAttr: `data-house="${esc(k(uid, 'shower_duration'))}"` })}
+            <div class="mt-2">${comboHtml({ name: '', options: durOpts, value: durVal, placeholder: '선택해 주세요', hiddenAttr: `data-house="${esc(k(uid, 'shower_duration'))}"` })}</div>
           </div>
         </div>`;
       };
