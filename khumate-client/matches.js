@@ -230,6 +230,57 @@ async function fetchSnapshots(matchId) {
   return data;
 }
 
+// ---------- 하우스룰 칸 (본격적인 하우스룰 입력 전 틀) ----------
+// 2열(나·룸메)로 보이는 항목: 기상·취침, 샤워. 나머지는 드롭다운(답 선택지만)
+const HOUSE_GROUPS = [
+  { title: '생활 리듬', items: [
+    { kind: 'pair', names: ['wake_time', 'sleep_time'], label: '기상 시간 · 취침 시간' },
+    { kind: 'pair', names: ['shower_time'], label: '샤워 시간' },
+  ] },
+  { title: '환경 및 생활 방식', items: [
+    { kind: 'select', name: 'media_style', label: '미디어 시청 방식' },
+    { kind: 'select', name: 'call_style', label: '통화 방식' },
+    { kind: 'select', name: 'light_pref', label: '취침 시간 조명' },
+    { kind: 'select', name: 'indoor_eating', label: '취식 허용 범위' },
+  ] },
+  { title: '청소 및 청결', items: [
+    { kind: 'select', name: 'clean_style', label: '공용 공간 청소 주기' },
+    { kind: 'select', name: 'tidy_level', label: '개인 공간 청소 주기' },
+    { kind: 'select', name: 'trash_style', label: '쓰레기 청소 주기' },
+    { kind: 'select', name: 'ventilation', label: '환기 주기' },
+  ] },
+  { title: '사생활', items: [
+    { kind: 'select', name: 'smoking', label: '담배' },
+    { kind: 'select', name: 'drinking', label: '음주' },
+  ] },
+];
+const HOUSE_PAIR_LABEL = { wake_time: '기상', sleep_time: '취침', shower_time: '샤워' };
+
+// 스키마에서 질문 정의 찾기 (그룹 안까지)
+function houseFieldDef(name) {
+  let found = null;
+  const walk = fields => (fields || []).forEach(f => {
+    if (found) return;
+    if (f.name === name) found = f;
+    else if (f.type === 'group') walk(f.fields);
+  });
+  PROFILE_SCHEMA.filter(sec => sectionScope(sec) === 'me').forEach(sec => walk(sec.fields));
+  return found;
+}
+
+function houseSelectHtml(name) {
+  const def = houseFieldDef(name);
+  const opts = (def?.options || []).map(op => `<option value="${esc(op.value)}">${esc(op.label)}</option>`).join('');
+  return `<select data-house="${esc(name)}" class="w-full appearance-none rounded-xl border border-orange-100 bg-gradient-to-r from-red-50 via-white to-orange-50 px-3 py-2.5 text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-orange-300">
+    <option value="">선택해 주세요</option>${opts}</select>`;
+}
+
+function houseCellHtml(tag, text) {
+  return `<div class="rounded-xl bg-gradient-to-br from-red-50 to-orange-50 px-3 py-2.5">
+    <p class="text-[10px] font-black khu-grad-text">${tag}</p>
+    <p class="text-sm font-bold text-slate-800 mt-0.5">${text}</p></div>`;
+}
+
 async function renderHouseRule() {
   const box = document.getElementById('houserule-body');
   if (!box) return;
@@ -244,17 +295,49 @@ async function renderHouseRule() {
     snaps.forEach(r => snapshotCache.set(r.owner_id, r));
     const mineRow = snaps.find(r => r.owner_id === currentUser.id);
     const partnerRow = snaps.find(r => r.owner_id !== currentUser.id);
-    const asCard = r => r ? cardHtml({ ...r, user_id: r.owner_id }, null, true) : '<p class="text-sm text-slate-400">카드 기록이 없어요.</p>';
+    if (!mineRow || !partnerRow) {
+      box.innerHTML = '<p class="text-center text-sm text-rose-500 py-20">확정 기록이 부족해요. 룸메 확정을 다시 해 주세요.</p>';
+      return;
+    }
+    const mine = { gender: mineRow.gender, dorm_period: mineRow.dorm_period, ...(mineRow.answers || {}) };
+    const theirs = { gender: partnerRow.gender, dorm_period: partnerRow.dorm_period, ...(partnerRow.answers || {}) };
+    const show = (obj, n) => (obj[n] === undefined || obj[n] === null || obj[n] === '') ? '미응답' : esc(valueText(n, obj[n]));
+    const asCard = r => cardHtml({ ...r, user_id: r.owner_id }, null, true);
+
+    const itemHtml = it => {
+      if (it.kind === 'pair') {
+        const line = obj => it.names.map(n => `${HOUSE_PAIR_LABEL[n]} ${show(obj, n)}`).join(' · ');
+        return `<div>
+          <p class="text-xs font-bold text-slate-600 mb-1.5">${esc(it.label)}</p>
+          <div class="grid grid-cols-2 gap-2">${houseCellHtml('나', line(mine))}${houseCellHtml('룸메', line(theirs))}</div>
+        </div>`;
+      }
+      return `<div>
+        <p class="text-xs font-bold text-slate-600 mb-1.5">${esc(it.label)}</p>
+        ${houseSelectHtml(it.name)}
+      </div>`;
+    };
+
     box.innerHTML = `
-      <div class="space-y-4 text-left">
+      <div class="space-y-5 text-left">
         <div class="text-center">
-          <p class="text-xs font-bold text-red-600">룸메 확정</p>
+          <p class="text-xs font-black khu-grad-text">룸메 확정</p>
           <p class="text-xs text-slate-500 mt-1">확정 당시의 카드예요. 카드를 고치면 여기도 함께 바뀌어요.</p>
         </div>
-        <p class="text-xs font-bold text-slate-500">상대 매칭 카드</p>
-        ${asCard(partnerRow)}
-        <p class="text-xs font-bold text-slate-500 pt-2">내 매칭 카드</p>
-        ${asCard(mineRow)}
+        <div>
+          <p class="text-xs font-black khu-grad-text text-center mb-2">확정 카드</p>
+          <div class="grid grid-cols-2 gap-3 items-start">
+            <div class="min-w-0"><p class="text-[11px] font-bold text-slate-500 mb-1">내 카드</p>${asCard(mineRow)}</div>
+            <div class="min-w-0"><p class="text-[11px] font-bold text-slate-500 mb-1">룸메 카드</p>${asCard(partnerRow)}</div>
+          </div>
+        </div>
+        ${HOUSE_GROUPS.map(g => `
+          <div class="rounded-3xl bg-white border border-orange-100 shadow-sm overflow-hidden">
+            <div class="px-4 py-2.5 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400 text-white">
+              <p class="text-sm font-black">${esc(g.title)}</p>
+            </div>
+            <div class="p-4 space-y-4">${g.items.map(itemHtml).join('')}</div>
+          </div>`).join('')}
         <div class="pt-2 text-center">
           <button onclick="onReleaseMatch(${Number(m.id)})" class="text-xs text-slate-500 underline hover:text-red-600">룸메 확정 해제</button>
         </div>
