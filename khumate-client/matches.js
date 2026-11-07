@@ -418,55 +418,60 @@ async function renderHouseRule() {
 
     // 생활 리듬: 왼쪽 '나'(내가 수정), 오른쪽 '룸메이트'(룸메만 수정). 기본값은 각자 카드 답
     // 저장 칸 이름은 '사람id:항목'이라 두 사람 답이 따로 저장됨
-    // 나 / 룸메이트 표시 (선택 항목 묶음 맨 위에 한 번)
-    const sidePills = `<div class="grid grid-cols-2 gap-3 -mb-1">
-        <div class="text-center"><span class="inline-block px-4 py-1.5 rounded-full bg-gradient-to-r from-red-100 via-rose-50 to-orange-100 border border-orange-100 text-red-600 text-sm font-black">나</span></div>
-        <div class="text-center"><span class="inline-block px-4 py-1.5 rounded-full bg-gradient-to-r from-red-100 via-rose-50 to-orange-100 border border-orange-100 text-red-600 text-sm font-black">룸메이트</span></div>
-      </div>`;
+    // 나 / 룸메이트 머리말: 정보 박스 바로 위, 왼쪽 정렬, 배경 없이 빨간 굵은 글씨
+    const SIDE_TAG = 'text-left text-sm font-black text-red-600 mb-1.5 pl-0.5';
+    // 항목 이름: 크고 진한 검정, 왼쪽 정렬
+    const ITEM_TITLE = 'text-left text-base font-black text-slate-900';
 
+    // 생활 리듬: 숙면 시간 / 샤워 시간 각각 나 | 룸메이트 두 칸 (각자 칸만 수정)
+    // 저장 칸 이름은 '사람id:항목'이라 두 사람 답이 따로 저장됨
     const sidesHtml = () => {
       const k = (uid, n) => `${uid}:${n}`;
-      const sideCol = (uid, src, editable, title) => {
-        // 기본값 = 각자 카드의 시간(HH:MM), 저장된 답이 있으면 그 답
-        const timeOf = n => {
-          const v = saved[k(uid, n)];
-          return (v !== undefined && !String(v).startsWith('{')) ? v : String(src[n] ?? '');
-        };
-        const timeBox = (n, lab, span) => `<div class="flex-1 min-w-0">
-            <p class="text-[11px] font-bold text-slate-500 mb-1 text-center">${lab}</p>
-            <div data-house-time="${esc(k(uid, n))}">${FIELD_RENDERERS.time({ name: 'house_' + n + '_' + uid, span, default: timeOf(n) })}</div>
-          </div>`;
-        const showerVal = saved[k(uid, 'shower_time')] !== undefined
-          ? saved[k(uid, 'shower_time')].split(',').filter(Boolean)
-          : [].concat(src.shower_time ?? []);
-        const showerOpts = (houseFieldDef('shower_time')?.options || []).map(op => `
-          <label class="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-orange-100 bg-gradient-to-r from-red-50 via-white to-orange-50 text-xs font-bold text-slate-800 cursor-pointer">
-            <input type="checkbox" data-house-multi="${esc(k(uid, 'shower_time'))}" value="${esc(op.value)}" ${showerVal.includes(op.value) ? 'checked' : ''} class="accent-red-600">${esc(op.label)}
-          </label>`).join('');
-        const durVal = String(saved[k(uid, 'shower_duration')] ?? src.shower_duration ?? '');
-        const durOpts = houseFieldDef('shower_duration')?.options || [];
-        return `<div class="min-w-0 space-y-4 ${editable ? '' : 'pointer-events-none'}">
-          <div class="text-center">
-            <span class="inline-block px-4 py-1.5 rounded-full bg-gradient-to-r from-red-100 via-rose-50 to-orange-100 border border-orange-100 text-red-600 text-sm font-black">${title}</span>
-          </div>
-          <div>
-            <p class="text-xs font-bold text-slate-600 mb-1.5">숙면 시간</p>
-            <div class="flex items-end gap-1.5">
-              ${timeBox('wake_time', '기상', [5, 12])}
-              <span class="pb-2.5 font-black text-slate-400">~</span>
-              ${timeBox('sleep_time', '취침', [21, 4])}
-            </div>
-          </div>
-          <div>
-            <p class="text-xs font-bold text-slate-600 mb-1.5">샤워 시간</p>
-            <div class="flex gap-2" data-house-multi-wrap>${showerOpts}</div>
-            <div class="mt-2">${comboHtml({ name: '', options: durOpts, value: durVal, placeholder: '선택해 주세요', hiddenAttr: `data-house="${esc(k(uid, 'shower_duration'))}"` })}</div>
-          </div>
+      const timeBox = (uid, n, lab, span, src) => {
+        const v = saved[k(uid, n)];
+        const cur = (v !== undefined && !String(v).startsWith('{')) ? v : String(src[n] ?? '');
+        return `<div class="flex-1 min-w-0">
+          <p class="text-[11px] font-bold text-slate-500 mb-1 text-center">${lab}</p>
+          <div data-house-time="${esc(k(uid, n))}">${FIELD_RENDERERS.time({ name: 'house_' + n + '_' + uid, span, default: cur })}</div>
         </div>`;
       };
-      return `<div class="grid grid-cols-2 gap-3 items-start">
-        ${sideCol(currentUser.id, mine, true, '나')}
-        ${sideCol(partnerRow.owner_id, theirs, false, '룸메이트')}
+      const showerCol = (uid, src, editable, tag) => {
+        const v = saved[k(uid, 'shower_time')];
+        const vals = v !== undefined ? v.split(',').filter(Boolean) : [].concat(src.shower_time ?? []);
+        const opts = (houseFieldDef('shower_time')?.options || []).map(op => `
+          <label class="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-orange-100 bg-gradient-to-r from-red-50 via-white to-orange-50 text-xs font-bold text-slate-800 cursor-pointer">
+            <input type="checkbox" data-house-multi="${esc(k(uid, 'shower_time'))}" value="${esc(op.value)}" ${vals.includes(op.value) ? 'checked' : ''} class="accent-red-600">${esc(op.label)}
+          </label>`).join('');
+        const durVal = String(saved[k(uid, 'shower_duration')] ?? src.shower_duration ?? '');
+        return `<div class="min-w-0 ${editable ? '' : 'pointer-events-none'}">
+          <p class="${SIDE_TAG}">${tag}</p>
+          <div class="flex gap-2" data-house-multi-wrap>${opts}</div>
+          <div class="mt-2">${comboHtml({ name: '', options: houseFieldDef('shower_duration')?.options || [], value: durVal, placeholder: '선택해 주세요', hiddenAttr: `data-house="${esc(k(uid, 'shower_duration'))}"` })}</div>
+        </div>`;
+      };
+      const timeCol = (uid, src, editable, tag) => `<div class="min-w-0 ${editable ? '' : 'pointer-events-none'}">
+          <p class="${SIDE_TAG}">${tag}</p>
+          <div class="flex items-end gap-1.5">
+            ${timeBox(uid, 'wake_time', '기상', [5, 12], src)}
+            <span class="pb-2.5 font-black text-slate-400">~</span>
+            ${timeBox(uid, 'sleep_time', '취침', [21, 4], src)}
+          </div>
+        </div>`;
+      return `<div class="space-y-4">
+        <div class="space-y-2.5">
+          <p class="${ITEM_TITLE}">숙면 시간</p>
+          <div class="grid grid-cols-2 gap-3 items-start">
+            ${timeCol(currentUser.id, mine, true, '나')}
+            ${timeCol(partnerRow.owner_id, theirs, false, '룸메이트')}
+          </div>
+        </div>
+        <div class="space-y-2.5">
+          <p class="${ITEM_TITLE}">샤워 시간</p>
+          <div class="grid grid-cols-2 gap-3 items-start">
+            ${showerCol(currentUser.id, mine, true, '나')}
+            ${showerCol(partnerRow.owner_id, theirs, false, '룸메이트')}
+          </div>
+        </div>
       </div>`;
     };
 
@@ -478,11 +483,11 @@ async function renderHouseRule() {
       const myKey = `${currentUser.id}:${it.name}`, theirKey = `${partnerRow.owner_id}:${it.name}`;
       const myVal = saved[myKey] ?? String(mine[it.name] ?? '');
       const theirVal = saved[theirKey] ?? String(theirs[it.name] ?? '');
-      return `<div>
-        <p class="text-xs font-bold text-slate-600 mb-1.5">${esc(it.label)}</p>
+      return `<div class="space-y-2.5">
+        <p class="${ITEM_TITLE}">${esc(it.label)}</p>
         <div class="grid grid-cols-2 gap-3 items-start">
-          <div class="min-w-0">${houseSelectHtml(it.name, myVal, myKey)}</div>
-          <div class="min-w-0 pointer-events-none">${houseSelectHtml(it.name, theirVal, theirKey)}</div>
+          <div class="min-w-0"><p class="${SIDE_TAG}">나</p>${houseSelectHtml(it.name, myVal, myKey)}</div>
+          <div class="min-w-0 pointer-events-none"><p class="${SIDE_TAG}">룸메이트</p>${houseSelectHtml(it.name, theirVal, theirKey)}</div>
         </div>
         <div class="mt-2.5">
           <p class="text-[11px] font-bold text-slate-500 mb-1">허용 범위</p>
@@ -511,7 +516,7 @@ async function renderHouseRule() {
             <div class="px-4 py-2.5 rounded-t-3xl bg-gradient-to-r from-red-600 via-rose-500 to-orange-400 text-white">
               <p class="text-sm font-black">${esc(g.title)}</p>
             </div>
-            <div class="p-4 space-y-4">${g.items.some(i => i.kind === 'select') ? sidePills : ''}${g.items.map(itemHtml).join('')}</div>
+            <div class="p-4 space-y-4">${g.items.map(itemHtml).join('')}</div>
           </div>`).join('')}
       </div>`;
   } catch (e) {
