@@ -418,10 +418,12 @@ async function renderHouseRule() {
 
     // 생활 리듬: 왼쪽 '나'(내가 수정), 오른쪽 '룸메이트'(룸메만 수정). 기본값은 각자 카드 답
     // 저장 칸 이름은 '사람id:항목'이라 두 사람 답이 따로 저장됨
-    // 나 / 룸메이트 머리말: 정보 박스 바로 위, 왼쪽 정렬, 배경 없이 빨간 굵은 글씨
-    const SIDE_TAG = 'text-left text-sm font-black text-red-600 mb-1.5 pl-0.5';
-    // 항목 이름: 크고 진한 검정, 왼쪽 정렬
-    const ITEM_TITLE = 'text-left text-base font-black text-slate-900';
+    // 항목 카드: 항목마다 흰 카드 하나로 분리. 제목 앞 그라데이션 막대로 구분
+    const CARD = 'rounded-2xl bg-white border border-slate-200 shadow-sm p-4 space-y-3.5';
+    const titleHtml = t => `<div class="flex items-center gap-2"><span class="w-1 h-4 rounded-full bg-gradient-to-b from-red-500 to-orange-400"></span><p class="text-sm font-black text-slate-900">${esc(t)}</p></div>`;
+    // 나 칸은 옅은 그라데이션, 룸메이트 칸은 회색 (한눈에 구분)
+    const sideCell = (mine, inner) => `<div class="rounded-xl p-2.5 ${mine ? 'bg-gradient-to-br from-red-50 to-orange-50 border border-orange-100' : 'bg-slate-50 border border-slate-200'}">${inner}</div>`;
+    const sideTag = (t, mine) => `<p class="text-[11px] font-black mb-1.5 ${mine ? 'text-red-600' : 'text-slate-500'}">${t}</p>`;
 
     // 생활 리듬: 숙면 시간 / 샤워 시간 각각 나 | 룸메이트 두 칸 (각자 칸만 수정)
     // 저장 칸 이름은 '사람id:항목'이라 두 사람 답이 따로 저장됨
@@ -444,35 +446,34 @@ async function renderHouseRule() {
           </label>`).join('');
         const durVal = String(saved[k(uid, 'shower_duration')] ?? src.shower_duration ?? '');
         return `<div class="min-w-0 ${editable ? '' : 'pointer-events-none'}">
-          <p class="${SIDE_TAG}">${tag}</p>
+          ${sideTag(tag, editable)}
           <div class="flex gap-2" data-house-multi-wrap>${opts}</div>
           <div class="mt-2">${comboHtml({ name: '', options: houseFieldDef('shower_duration')?.options || [], value: durVal, placeholder: '선택해 주세요', hiddenAttr: `data-house="${esc(k(uid, 'shower_duration'))}"` })}</div>
         </div>`;
       };
       const timeCol = (uid, src, editable, tag) => `<div class="min-w-0 ${editable ? '' : 'pointer-events-none'}">
-          <p class="${SIDE_TAG}">${tag}</p>
+          ${sideTag(tag, editable)}
           <div class="flex items-end gap-1.5">
             ${timeBox(uid, 'wake_time', '기상', [5, 12], src)}
             <span class="pb-2.5 font-black text-slate-400">~</span>
             ${timeBox(uid, 'sleep_time', '취침', [21, 4], src)}
           </div>
         </div>`;
-      return `<div class="space-y-4">
-        <div class="space-y-2.5">
-          <p class="${ITEM_TITLE}">숙면 시간</p>
-          <div class="grid grid-cols-2 gap-3 items-start">
-            ${timeCol(currentUser.id, mine, true, '나')}
-            ${timeCol(partnerRow.owner_id, theirs, false, '룸메이트')}
+      return `
+        <div class="${CARD}">
+          ${titleHtml('숙면 시간')}
+          <div class="grid grid-cols-2 gap-2.5 items-start">
+            ${sideCell(true, timeCol(currentUser.id, mine, true, '나'))}
+            ${sideCell(false, timeCol(partnerRow.owner_id, theirs, false, '룸메이트'))}
           </div>
         </div>
-        <div class="space-y-2.5">
-          <p class="${ITEM_TITLE}">샤워 시간</p>
-          <div class="grid grid-cols-2 gap-3 items-start">
-            ${showerCol(currentUser.id, mine, true, '나')}
-            ${showerCol(partnerRow.owner_id, theirs, false, '룸메이트')}
+        <div class="${CARD}">
+          ${titleHtml('샤워 시간')}
+          <div class="grid grid-cols-2 gap-2.5 items-start">
+            ${sideCell(true, showerCol(currentUser.id, mine, true, '나'))}
+            ${sideCell(false, showerCol(partnerRow.owner_id, theirs, false, '룸메이트'))}
           </div>
-        </div>
-      </div>`;
+        </div>`;
     };
 
     const itemHtml = it => {
@@ -483,16 +484,16 @@ async function renderHouseRule() {
       const myKey = `${currentUser.id}:${it.name}`, theirKey = `${partnerRow.owner_id}:${it.name}`;
       const myVal = saved[myKey] ?? String(mine[it.name] ?? '');
       const theirVal = saved[theirKey] ?? String(theirs[it.name] ?? '');
-      return `<div class="space-y-2.5">
-        <p class="${ITEM_TITLE}">${esc(it.label)}</p>
-        <div class="grid grid-cols-2 gap-3 items-start">
-          <div class="min-w-0"><p class="${SIDE_TAG}">나</p>${houseSelectHtml(it.name, myVal, myKey)}</div>
-          <div class="min-w-0 pointer-events-none"><p class="${SIDE_TAG}">룸메이트</p>${houseSelectHtml(it.name, theirVal, theirKey)}</div>
+      return `<div class="${CARD}">
+        ${titleHtml(it.label)}
+        <div class="grid grid-cols-2 gap-2.5 items-start">
+          ${sideCell(true, `${sideTag('나', true)}${houseSelectHtml(it.name, myVal, myKey)}`)}
+          ${sideCell(false, `${sideTag('룸메이트', false)}<div class="pointer-events-none">${houseSelectHtml(it.name, theirVal, theirKey)}</div>`)}
         </div>
-        <div class="mt-2.5">
-          <p class="text-[11px] font-bold text-slate-500 mb-1">허용 범위</p>
+        <div class="rounded-xl bg-gradient-to-r from-red-50/70 via-white to-orange-50/70 border border-orange-100 p-3">
+          <p class="text-[11px] font-black text-red-600 mb-1.5">허용 범위</p>
           ${houseSelectHtml(it.name, hasSaved ? saved[it.name] : r.value)}
-          ${r.conflict && !hasSaved ? '<p class="text-[11px] font-bold text-rose-500 mt-1.5 px-0.5">협의가 필요해요</p>' : ''}
+          ${r.conflict && !hasSaved ? '<p class="text-[11px] font-bold text-rose-500 mt-1.5">협의가 필요해요</p>' : ''}
         </div>
       </div>`;
     };
@@ -512,12 +513,12 @@ async function renderHouseRule() {
           ${topBox('룸메 카드', partnerRow)}
         </div>
         ${HOUSE_GROUPS.map(g => `
-          <div class="rounded-3xl bg-white border border-orange-100 shadow-sm">
-            <div class="px-4 py-2.5 rounded-t-3xl bg-gradient-to-r from-red-600 via-rose-500 to-orange-400 text-white">
-              <p class="text-sm font-black">${esc(g.title)}</p>
-            </div>
-            <div class="p-4 space-y-4">${g.items.map(itemHtml).join('')}</div>
-          </div>`).join('')}
+          <section class="rounded-3xl bg-gradient-to-b from-orange-50/50 to-white border border-orange-100 shadow-sm overflow-hidden">
+            <header class="px-5 py-3 bg-gradient-to-r from-red-600 via-rose-500 to-orange-400 text-white">
+              <p class="text-sm font-black tracking-tight">${esc(g.title)}</p>
+            </header>
+            <div class="p-3 space-y-3">${g.items.map(itemHtml).join('')}</div>
+          </section>`).join('')}
       </div>`;
   } catch (e) {
     console.error('[matches] 하우스룰 실패:', e.message);
