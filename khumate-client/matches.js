@@ -236,6 +236,7 @@ const HOUSE_GROUPS = [
   { title: '생활 리듬', items: [
     { kind: 'pair', names: ['wake_time', 'sleep_time'], label: '기상 시간 · 취침 시간' },
     { kind: 'pair', names: ['shower_time'], label: '샤워 시간' },
+    { kind: 'select', name: 'shower_duration', label: '샤워 소요 시간' },
   ] },
   { title: '환경 및 생활 방식', items: [
     { kind: 'select', name: 'media_style', label: '미디어 시청 방식' },
@@ -299,11 +300,34 @@ async function saveHouseItem(matchId, field, answer) {
 
 // 드롭다운을 고르면 저장 (이벤트 위임: 다시 그려져도 동작)
 document.addEventListener('change', e => {
-  if (!e.target.classList?.contains('khu-combo-input')) return;
-  const hidden = e.target.closest('.khu-combo')?.querySelector('input[data-house]');
-  if (!hidden || !houseMatchId) return;
-  saveHouseItem(houseMatchId, hidden.dataset.house, hidden.value);
+  if (!houseMatchId) return;
+  // 드롭다운
+  if (e.target.classList?.contains('khu-combo-input')) {
+    const hidden = e.target.closest('.khu-combo')?.querySelector('input[data-house]');
+    if (hidden) saveHouseItem(houseMatchId, hidden.dataset.house, hidden.value);
+    return;
+  }
+  // 시간 범위 (기상·취침): 시작·끝을 둘 다 고르면 저장
+  const range = e.target.closest?.('[data-house-range]');
+  if (range) {
+    const from = range.querySelector('input[data-part="from"]')?.value;
+    const to = range.querySelector('input[data-part="to"]')?.value;
+    if (from && to && from !== 'any' && to !== 'any') saveHouseItem(houseMatchId, range.dataset.houseRange, JSON.stringify({ from, to }));
+    return;
+  }
+  // 샤워 시간대 (여러 개 고르기)
+  if (e.target.matches?.('input[data-house-multi]')) {
+    const field = e.target.dataset.houseMulti;
+    const vals = [...document.querySelectorAll(`input[data-house-multi="${field}"]:checked`)].map(el => el.value);
+    if (vals.length) saveHouseItem(houseMatchId, field, vals.join(','));
+    else renderHouseRule();
+  }
 });
+
+// 저장된 답 읽기 (시간 범위는 JSON, 샤워는 쉼표 목록)
+function houseRangeValue(saved, name) {
+  try { return saved[name] ? JSON.parse(saved[name]) : null; } catch (e) { return null; }
+}
 
 // 자동 합의 답안
 // 허용 범위(rm_*)의 가장 높은 단계 = 그 칸에서 받아 줄 수 있는 마지막 단계 (상관없음 = 마지막)
@@ -388,9 +412,30 @@ async function renderHouseRule() {
     const itemHtml = it => {
       if (it.kind === 'pair') {
         const line = obj => it.names.map(n => `${HOUSE_PAIR_LABEL[n]} ${show(obj, n)}`).join(' · ');
+        // 아래 선택기: 카드와 같은 시간 범위·샤워 서식 (합의 답으로 저장됨)
+        const pickers = it.names.map(n => {
+          if (n === 'shower_time') {
+            const def = houseFieldDef(n);
+            const cur = (saved[n] || '').split(',').filter(Boolean);
+            return `<div>
+              <p class="text-[11px] font-bold text-slate-500 mb-1">합의 ${HOUSE_PAIR_LABEL[n]}</p>
+              <div class="flex gap-2" data-house-multi-wrap>${(def?.options || []).map(op => `
+                <label class="flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl border border-orange-100 bg-gradient-to-r from-red-50 via-white to-orange-50 text-xs font-bold text-slate-800 cursor-pointer">
+                  <input type="checkbox" data-house-multi="${esc(n)}" value="${esc(op.value)}" ${cur.includes(op.value) ? 'checked' : ''} class="accent-red-600">${esc(op.label)}
+                </label>`).join('')}</div>
+            </div>`;
+          }
+          const span = RM_OVERRIDE[n]?.span || [0, 23];
+          const cur = houseRangeValue(saved, n);
+          return `<div>
+            <p class="text-[11px] font-bold text-slate-500 mb-1">합의 ${HOUSE_PAIR_LABEL[n]} 시간</p>
+            <div data-house-range="${esc(n)}">${FIELD_RENDERERS.hourrange({ name: 'house_' + n, span, default: cur })}</div>
+          </div>`;
+        }).join('');
         return `<div>
           <p class="text-xs font-bold text-slate-600 mb-1.5">${esc(it.label)}</p>
           <div class="grid grid-cols-2 gap-2">${houseCellHtml('나', line(mine))}${houseCellHtml('룸메', line(theirs))}</div>
+          <div class="mt-3 space-y-3">${pickers}</div>
         </div>`;
       }
       // 저장된 답이 있으면 그 답, 없으면 자동 합의 답. 저장된 답이 생기면 '협의' 표시는 접음
@@ -406,11 +451,11 @@ async function renderHouseRule() {
     box.innerHTML = `
       <style>
         /* 하우스룰 드롭다운: 선택된 답 칸만 옅은 그라데이션 (목록은 흰색 그대로) */
-        .khu-house .khu-combo-input { background: linear-gradient(to right, #fef2f2, #ffffff 55%, #fff7ed) !important; }
+        .khu-house .khu-combo-input { background: linear-gradient(to right, #fef2f2, #ffffff 55%, #fff7ed) !important; font-weight: 700 !important; color: #1e293b !important; }
       </style>
       <div class="space-y-5 text-left khu-house">
         <!-- 맨 위: 룸메 확정 해제 (눈에 띄게, 누르면 확인 팝업) -->
-        <button onclick="onReleaseMatch(${Number(m.id)})" class="w-full py-3 rounded-2xl border-2 border-red-500 bg-white text-red-600 text-sm font-black shadow-sm hover:bg-red-50 transition">⚠ 룸메 확정 해제</button>
+        <div class="flex justify-end"><button onclick="onReleaseMatch(${Number(m.id)})" class="px-3 py-1.5 rounded-lg border border-red-400 bg-white text-red-600 text-xs font-bold hover:bg-red-50 transition">룸메 확정 해제</button></div>
         <div class="grid grid-cols-2 gap-3 items-stretch">
           ${topBox('내 카드', mineRow)}
           ${topBox('룸메 카드', partnerRow)}
