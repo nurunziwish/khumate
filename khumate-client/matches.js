@@ -419,7 +419,7 @@ async function renderHouseRule() {
     // 생활 리듬: 왼쪽 '나'(내가 수정), 오른쪽 '룸메이트'(룸메만 수정). 기본값은 각자 카드 답
     // 저장 칸 이름은 '사람id:항목'이라 두 사람 답이 따로 저장됨
     // 항목 카드: 항목마다 흰 카드 하나로 분리. 제목 앞 그라데이션 막대로 구분
-    const CARD = 'rounded-2xl bg-slate-50 border border-slate-200 p-4 space-y-3.5';
+    const CARD = 'rounded-2xl bg-white border border-slate-200 p-4 space-y-3.5';
     const titleHtml = t => `<div class="flex items-center gap-2"><span class="w-1 h-4 rounded-full bg-gradient-to-b from-red-500 to-orange-400"></span><p class="text-sm font-black text-slate-900">${esc(t)}</p></div>`;
     // 나 / 룸메이트 / 허용 범위 칸은 흰색 배경. 나·룸메이트 머리말은 빨간 글씨
     const sideCell = (mine, inner) => `<div class="rounded-xl p-2.5 bg-white border border-slate-200">${inner}</div>`;
