@@ -268,9 +268,9 @@ function houseFieldDef(name) {
 }
 
 // 답 선택지만 보여 주는 드롭다운 (다른 서식과 같은 comboHtml 사용)
-function houseSelectHtml(name, value = '') {
+function houseSelectHtml(name, value = '', key = name) {
   const def = houseFieldDef(name);
-  return comboHtml({ name: '', options: def?.options || [], value, placeholder: '선택해 주세요', hiddenAttr: `data-house="${esc(name)}"` });
+  return comboHtml({ name: '', options: def?.options || [], value, placeholder: '선택해 주세요', hiddenAttr: `data-house="${esc(key)}"` });
 }
 
 // 저장 / 실시간 공유 (house_rule_items: 칸 하나당 한 줄)
@@ -280,6 +280,13 @@ async function fetchHouseItems(matchId) {
   const { data, error } = await sb.from('house_rule_items').select('field, answer').eq('match_id', matchId);
   if (error) throw error;
   return Object.fromEntries((data || []).map(r => [r.field, r.answer]));
+}
+
+// 바꾸기 전에 확인: 저장하면 룸메이트 화면에도 바로 반영됨을 알림. 취소하면 이전 값으로 되돌림
+async function confirmThenSave(matchId, field, answer) {
+  const ok = await khuConfirm('값을 바꾸면 룸메이트 화면에도 바로 반영돼요.\n바꿀까요?');
+  if (!ok) return renderHouseRule();
+  return saveHouseItem(matchId, field, answer);
 }
 
 async function saveHouseItem(matchId, field, answer) {
@@ -302,7 +309,7 @@ document.addEventListener('change', e => {
   // 드롭다운
   if (e.target.classList?.contains('khu-combo-input')) {
     const hidden = e.target.closest('.khu-combo')?.querySelector('input[data-house]');
-    if (hidden) saveHouseItem(houseMatchId, hidden.dataset.house, hidden.value);
+    if (hidden) confirmThenSave(houseMatchId, hidden.dataset.house, hidden.value);
     return;
   }
   // 시간 (기상·취침): 시와 분을 둘 다 고르면 HH:MM 으로 저장
@@ -310,14 +317,14 @@ document.addEventListener('change', e => {
   if (tbox) {
     const h = tbox.querySelector('[data-part="h"]')?.value;
     const m = tbox.querySelector('[data-part="m"]')?.value;
-    if (h && m) saveHouseItem(houseMatchId, tbox.dataset.houseTime, `${h}:${m}`);
+    if (h && m) confirmThenSave(houseMatchId, tbox.dataset.houseTime, `${h}:${m}`);
     return;
   }
   // 샤워 시간대 (여러 개 고르기)
   if (e.target.matches?.('input[data-house-multi]')) {
     const field = e.target.dataset.houseMulti;
     const vals = [...document.querySelectorAll(`input[data-house-multi="${field}"]:checked`)].map(el => el.value);
-    saveHouseItem(houseMatchId, field, vals.join(','));
+    confirmThenSave(houseMatchId, field, vals.join(','));
   }
 });
 
@@ -411,6 +418,12 @@ async function renderHouseRule() {
 
     // 생활 리듬: 왼쪽 '나'(내가 수정), 오른쪽 '룸메이트'(룸메만 수정). 기본값은 각자 카드 답
     // 저장 칸 이름은 '사람id:항목'이라 두 사람 답이 따로 저장됨
+    // 나 / 룸메이트 표시 (선택 항목 묶음 맨 위에 한 번)
+    const sidePills = `<div class="grid grid-cols-2 gap-3 -mb-1">
+        <div class="text-center"><span class="inline-block px-4 py-1.5 rounded-full bg-gradient-to-r from-red-100 via-rose-50 to-orange-100 border border-orange-100 text-red-600 text-sm font-black">나</span></div>
+        <div class="text-center"><span class="inline-block px-4 py-1.5 rounded-full bg-gradient-to-r from-red-100 via-rose-50 to-orange-100 border border-orange-100 text-red-600 text-sm font-black">룸메이트</span></div>
+      </div>`;
+
     const sidesHtml = () => {
       const k = (uid, n) => `${uid}:${n}`;
       const sideCol = (uid, src, editable, title) => {
@@ -434,7 +447,7 @@ async function renderHouseRule() {
         const durOpts = houseFieldDef('shower_duration')?.options || [];
         return `<div class="min-w-0 space-y-4 ${editable ? '' : 'pointer-events-none'}">
           <div class="text-center">
-            <span class="inline-block px-4 py-1.5 rounded-full bg-gradient-to-r from-red-600 via-rose-500 to-orange-400 text-white text-sm font-black shadow-sm">${title}</span>
+            <span class="inline-block px-4 py-1.5 rounded-full bg-gradient-to-r from-red-100 via-rose-50 to-orange-100 border border-orange-100 text-red-600 text-sm font-black">${title}</span>
           </div>
           <div>
             <p class="text-xs font-bold text-slate-600 mb-1.5">숙면 시간</p>
@@ -459,20 +472,32 @@ async function renderHouseRule() {
 
     const itemHtml = it => {
       if (it.kind === 'sides') return sidesHtml();
-      // 저장된 답이 있으면 그 답, 없으면 자동 합의 답. 저장된 답이 생기면 '협의' 표시는 접음
+      // 나: 내 정보값(내가 수정) · 룸메이트: 룸메 정보값(보기만) · 허용 범위: 둘이 합의한 공통 답(둘 다 수정, 저장값 우선 / 없으면 자동)
       const r = houseEval(it.name, mine, theirs);
       const hasSaved = saved[it.name] !== undefined;
+      const myKey = `${currentUser.id}:${it.name}`, theirKey = `${partnerRow.owner_id}:${it.name}`;
+      const myVal = saved[myKey] ?? String(mine[it.name] ?? '');
+      const theirVal = saved[theirKey] ?? String(theirs[it.name] ?? '');
       return `<div>
         <p class="text-xs font-bold text-slate-600 mb-1.5">${esc(it.label)}</p>
-        ${houseSelectHtml(it.name, hasSaved ? saved[it.name] : r.value)}
-        ${r.conflict && !hasSaved ? '<p class="text-[11px] font-bold text-rose-500 mt-1.5 px-0.5">협의가 필요해요</p>' : ''}
+        <div class="grid grid-cols-2 gap-3 items-start">
+          <div class="min-w-0">${houseSelectHtml(it.name, myVal, myKey)}</div>
+          <div class="min-w-0 pointer-events-none">${houseSelectHtml(it.name, theirVal, theirKey)}</div>
+        </div>
+        <div class="mt-2.5">
+          <p class="text-[11px] font-bold text-slate-500 mb-1">허용 범위</p>
+          ${houseSelectHtml(it.name, hasSaved ? saved[it.name] : r.value)}
+          ${r.conflict && !hasSaved ? '<p class="text-[11px] font-bold text-rose-500 mt-1.5 px-0.5">협의가 필요해요</p>' : ''}
+        </div>
       </div>`;
     };
 
     box.innerHTML = `
       <style>
-        /* 하우스룰 드롭다운: 선택된 답 칸만 옅은 그라데이션 (목록은 흰색 그대로) */
-        .khu-house .khu-combo-input { background: linear-gradient(to right, #fef2f2, #ffffff 55%, #fff7ed) !important; font-weight: 700 !important; color: #1e293b !important; }
+        /* 하우스룰 칸: 옅은 그라데이션 + 얇은 연붉은 테두리 (샤워 시간대 칸과 같은 서식) */
+        .khu-house .khu-combo-input { background: linear-gradient(to right, #fef2f2, #ffffff 55%, #fff7ed) !important; border: 1px solid #ffedd5 !important; border-radius: 0.75rem !important; font-weight: 700 !important; color: #1e293b !important; }
+        .khu-house [data-time-picker] { background: linear-gradient(to right, #fef2f2, #ffffff 55%, #fff7ed) !important; border: 1px solid #ffedd5 !important; border-radius: 0.75rem !important; }
+        .khu-house [data-time-picker] .khu-combo-input { background: transparent !important; border: none !important; }
       </style>
       <div class="space-y-5 text-left khu-house">
         <!-- 맨 위: 룸메 확정 해제 (눈에 띄게, 누르면 확인 팝업) -->
@@ -486,7 +511,7 @@ async function renderHouseRule() {
             <div class="px-4 py-2.5 rounded-t-3xl bg-gradient-to-r from-red-600 via-rose-500 to-orange-400 text-white">
               <p class="text-sm font-black">${esc(g.title)}</p>
             </div>
-            <div class="p-4 space-y-4">${g.items.map(itemHtml).join('')}</div>
+            <div class="p-4 space-y-4">${g.items.some(i => i.kind === 'select') ? sidePills : ''}${g.items.map(itemHtml).join('')}</div>
           </div>`).join('')}
       </div>`;
   } catch (e) {
