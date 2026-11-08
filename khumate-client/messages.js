@@ -228,7 +228,9 @@ async function renderThread(scrollToEnd = false) {
     const notice = await threadMatchNoticeHtml(msgPeer).catch(() => '');   // 룸메 신청 표시 (matches.js)
     // 같은 사람이 같은 분에 보낸 연속 메시지는 묶어서, 시간·읽음 표시는 묶음의 마지막에만 붙임
     const minuteKey = x => Math.floor(new Date(x.created_at).getTime() / 60000);
-    body.innerHTML = notice + (rows.length
+    const noticeEl = document.getElementById('thread-notice');   // 룸메 신청 안내: 스크롤과 상관없이 위에 고정
+    if (noticeEl) noticeEl.innerHTML = notice;
+    body.innerHTML = (rows.length
       ? rows.map((m, idx) => {
           const mine = m.from_id === currentUser.id;
           const prev = rows[idx - 1], next = rows[idx + 1];

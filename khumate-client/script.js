@@ -605,11 +605,7 @@ function renderAiModal() {
   const addedCount = aiBatchRank ? cands.filter(x => !aiBatchRank.has(x.post.user_id)).length : 0;
   const allDone = n > 0 && !rankChanged && addedCount === 0 && cands.every(x => aiState(x.post.user_id, x.post.updated_at) === 'done');
   // 내 카드가 분석 뒤에 바뀌었으면 버튼 옆에 안내
-  const myChanged = !!myPost && cands.some(x => {
-    const r = aiByUid.get(x.post.user_id);
-    return !!r && !!r.viewer_updated && new Date(r.viewer_updated).getTime() !== new Date(myPost.updated_at).getTime();
-  });
-  const msgs = [myChanged ? '⚠ 내 카드가 바뀌었어요' : '', rankChanged ? '⚠ 관련도 순서가 바뀌었어요' : '', addedCount ? `➕ 새 카드 ${addedCount}명이 추가됐어요` : ''].filter(Boolean);
+  const msgs = [rankChanged ? '⚠ 관련도 순서가 바뀌었어요' : '', addedCount ? `➕ 새 카드 ${addedCount}명이 추가됐어요` : ''].filter(Boolean);
   // 안내 문구: 버튼 왼쪽 흰 줄에 한 줄씩 (왼쪽 정렬)
   const notesEl = document.getElementById('ai-notes');
   if (notesEl) notesEl.innerHTML = msgs.map(m => `<p class="text-xs font-bold text-rose-600 leading-snug">${m}</p>`).join('');
@@ -1061,7 +1057,7 @@ function aiBoxHtml(ai) {
   const adj = ai.adjust > 0 ? `+${ai.adjust}` : `${ai.adjust}`;
   return `
     <div class="bg-red-50/60 border border-red-100 text-slate-700 rounded-xl p-4 text-xs leading-relaxed space-y-2">
-      <p class="font-bold text-red-600">🤖 AI 분석 <span class="font-bold text-slate-500">· 규칙 ${ai.rule_score}점 → AI 보정 ${adj} → 최종 ${ai.final}점</span></p>
+      <p class="font-bold text-red-600">🤖 AI 분석 <span class="font-bold text-slate-500">· 최종 ${ai.final}점</span></p>
       <p>${esc(ai.summary)}</p>
       ${ai.analysis ? `<p class="text-slate-600">${esc(ai.analysis)}</p>` : ''}
       ${ai.good?.length ? `<p class="font-bold text-slate-600"><span class="text-emerald-600 font-bold">✔ 잘 맞는 점</span> ${ai.good.map(esc).join(' · ')}</p>` : ''}
