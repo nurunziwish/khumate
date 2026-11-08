@@ -1,10 +1,12 @@
 // ================= 쪽지 (1:1 메시지) · 채팅 탭 메시지함 =================
 // 테이블: messages (messages-setup.sql). 상대 이름은 상대 룸메 글 제목으로 보여 줌 (아이디는 공개하지 않음)
 // 의존: auth.js 의 sb, script.js 의 currentUser, profile-form.js 의 esc, posts.js 의 POSTS_TABLE
-// 새 쪽지 확인: 30초마다 + 탭으로 돌아올 때. (실시간 알림은 나중에)
+// 실시간: Supabase Realtime(postgres_changes)으로 새 쪽지·읽음·룸메 신청을 바로 반영.
+//         연결이 끊기면 60초마다 확인하는 방식으로 자동 보완. (realtime-setup.sql 적용 필요)
 
 const MSG_TABLE = 'messages';
-const MSG_POLL_MS = 30000;
+const HIDE_TABLE = 'thread_hides';   // 채팅방 삭제 기록 (message-hide-setup.sql)
+const MSG_POLL_MS = 60000;
 const MSG_MAX_LEN = 300;
 
 // ---------- 데이터 ----------
@@ -18,13 +20,28 @@ async function sendMessage(myId, toId, body) {
   if (error) throw error;
 }
 
-// 상대 한 명과 주고받은 쪽지 (오래된 순)
+// 내가 삭제한 채팅방 기준 시각 (삭제 시점 이전 쪽지는 내 화면에서 숨김)
+async function fetchHides(myId) {
+  const { data, error } = await sb.from(HIDE_TABLE).select('peer_id,hidden_at').eq('user_id', myId);
+  if (error) throw error;
+  return new Map(data.map(r => [r.peer_id, new Date(r.hidden_at).getTime()]));
+}
+const isHidden = (hides, peer, iso) => hides.has(peer) && new Date(iso).getTime() <= hides.get(peer);
+
+// 채팅방 삭제 (내 화면에서만. 서버 시각을 기준으로 기록)
+async function deleteThread(peerId) {
+  const { error } = await sb.rpc('hide_thread', { peer: peerId });
+  if (error) throw error;
+}
+
+// 상대 한 명과 주고받은 쪽지 (오래된 순, 내가 삭제한 시점 이전 것은 제외)
 async function fetchThread(myId, peerId) {
   const { data, error } = await sb.from(MSG_TABLE).select('*')
     .or(`and(from_id.eq.${myId},to_id.eq.${peerId}),and(from_id.eq.${peerId},to_id.eq.${myId})`)
     .order('created_at', { ascending: true }).limit(300);
   if (error) throw error;
-  return data;
+  const hides = await fetchHides(myId);
+  return data.filter(m => !isHidden(hides, peerId, m.created_at));
 }
 
 // 상대 아이디 → 룸메 글 제목 (글이 없으면 맵에 없음)
@@ -48,9 +65,11 @@ async function fetchInbox(myId) {
     .or(`from_id.eq.${myId},to_id.eq.${myId}`)
     .order('created_at', { ascending: false }).limit(500);
   if (error) throw error;
+  const hides = await fetchHides(myId);
   const map = new Map();
   for (const m of data) {
     const peer = m.from_id === myId ? m.to_id : m.from_id;
+    if (isHidden(hides, peer, m.created_at)) continue;   // 내가 삭제한 채팅방의 옛 쪽지
     if (!map.has(peer)) map.set(peer, { peer, last: m, unread: 0 });
     if (m.to_id === myId && !m.read_at) map.get(peer).unread++;
   }
@@ -62,13 +81,15 @@ async function fetchInbox(myId) {
 
 // 안 읽은 쪽지 수 + 받은 룸메 매칭 신청(대기 중) 수 (헤더 뱃지용)
 async function fetchUnreadCount(myId) {
-  const { count, error } = await sb.from(MSG_TABLE).select('id', { count: 'exact', head: true })
+  const { data, error } = await sb.from(MSG_TABLE).select('from_id,created_at')
     .eq('to_id', myId).is('read_at', null);
   if (error) throw error;
+  const hides = await fetchHides(myId);
+  const count = data.filter(m => !isHidden(hides, m.from_id, m.created_at)).length;
   const req = await sb.from('match_requests').select('id', { count: 'exact', head: true })
     .eq('to_id', myId).eq('status', 'pending');
   if (req.error) throw req.error;
-  return (count ?? 0) + (req.count ?? 0);
+  return count + (req.count ?? 0);
 }
 
 // 상대가 보낸 쪽지를 모두 읽음 처리
@@ -87,6 +108,7 @@ const timeLabel = iso => new Date(iso).toLocaleString('ko-KR', { month: 'numeric
 
 // 헤더 뱃지 + (메시지함 탭이 열려 있으면) 목록 갱신
 async function refreshMessages() {
+  ensureRealtime();
   const badge = document.getElementById('chat-badge');
   if (!currentUser) { badge?.classList.add('hidden'); return; }
   try {
@@ -110,18 +132,22 @@ async function renderInbox() {
     list.innerHTML = convs.map(c => {
       const mine = c.last.from_id === currentUser.id;
       const preview = (mine ? '나: ' : '') + c.last.body;
+      const isIncoming = incoming.has(c.peer);
       return `
-        <button data-peer="${esc(c.peer)}" data-title="${esc(c.title)}" onclick="openThreadFromInbox(this)" class="w-full text-left rounded-2xl p-4 shadow-sm hover:shadow-md transition flex items-center gap-3 ${incoming.has(c.peer) ? 'bg-rose-50/50 border border-red-200' : 'bg-white border border-slate-200'}">
-          <div class="min-w-0 flex-1">
-            ${incoming.has(c.peer) ? '<span class="inline-block mb-1 px-2 py-0.5 rounded-md bg-red-100 text-red-600 text-[10px] font-bold">룸메 신청이 왔어요</span>' : ''}
-            <p class="font-bold text-slate-800 truncate">${esc(c.title)}</p>
+        <div class="relative rounded-2xl shadow-sm hover:shadow-md transition ${isIncoming ? 'bg-rose-50/50 border border-red-200' : 'bg-white border border-slate-200'}">
+          <button data-peer="${esc(c.peer)}" data-title="${esc(c.title)}" onclick="openThreadFromInbox(this)" class="w-full text-left p-4 pr-14 rounded-2xl">
+            ${isIncoming ? '<span class="inline-block mb-1 px-2 py-0.5 rounded-md bg-red-100 text-red-600 text-[10px] font-bold">룸메 신청이 왔어요</span>' : ''}
+            <div class="flex items-center gap-2 min-w-0">
+              <p class="font-bold text-slate-800 truncate flex-1">${esc(c.title)}</p>
+              ${c.unread ? `<span class="shrink-0 px-1.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-bold">${c.unread}</span>` : ''}
+            </div>
             <p class="text-xs text-slate-500 truncate mt-0.5">${esc(preview)}</p>
-          </div>
-          <div class="text-right shrink-0 space-y-1">
-            <p class="text-[10px] text-slate-400">${timeLabel(c.last.created_at)}</p>
-            ${c.unread ? `<span class="inline-block px-1.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-bold">${c.unread}</span>` : ''}
-          </div>
-        </button>`;
+            <p class="text-[10px] text-slate-400 mt-1.5">${timeLabel(c.last.created_at)}</p>
+          </button>
+          <button type="button" title="채팅방 삭제" aria-label="채팅방 삭제" data-peer="${esc(c.peer)}" onclick="deleteThreadFromInbox(this)" class="absolute top-3 right-3 w-8 h-8 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center">
+            <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+          </button>
+        </div>`;
     }).join('');
   } catch (e) {
     console.error(e);
@@ -130,6 +156,23 @@ async function renderInbox() {
 }
 
 function openThreadFromInbox(btn) { openThread(btn.dataset.peer, btn.dataset.title); }
+
+// 쓰레기통 버튼: 내 화면에서만 채팅방 삭제 (상대 화면에는 그대로 남음)
+async function deleteThreadFromInbox(btn) {
+  const peer = btn.dataset.peer;
+  if (!peer || !currentUser) return;
+  const ok = await khuConfirm('이 채팅방을 삭제할까요?\n내 화면에서만 사라지고, 상대방 화면에는 그대로 남아요. 이후 새 쪽지가 오면 새 대화로 다시 보여요.', { okText: '삭제' });
+  if (!ok) return;
+  try {
+    await deleteThread(peer);
+    if (msgPeer === peer) closeThread();
+    renderInbox();
+    refreshMessages();
+  } catch (e) {
+    console.error(e);
+    showToast('채팅방을 삭제하지 못했어요.');
+  }
+}
 
 // 대화창 제목: 상대 카드의 기본 정보 (글 제목 대신)
 async function setThreadTitle(peerId) {
@@ -222,6 +265,54 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && msgPeer) closeThread();
 });
 
-// 주기적으로 새 쪽지 확인 + 창으로 돌아오면 바로 확인
+// ---------- 실시간 반영 ----------
+
+let msgChannel = null;        // Supabase Realtime 채널
+let msgChannelUser = null;    // 채널을 연 사용자 아이디
+let msgRtTimer = null;
+
+// 변화가 여러 번 와도 한 번만 그리도록 잠깐 모아서 처리
+// 열린 대화와 관련된 변화면 대화창도 다시 그림 (맨 아래에 있었으면 맨 아래 유지)
+function scheduleRealtimeRefresh(peerId) {
+  clearTimeout(msgRtTimer);
+  msgRtTimer = setTimeout(async () => {
+    refreshMessages();
+    if (msgPeer && (!peerId || peerId === msgPeer)) {
+      const body = document.getElementById('thread-body');
+      const nearBottom = body ? body.scrollHeight - body.scrollTop - body.clientHeight < 80 : false;
+      await renderThread(nearBottom);
+    }
+  }, 150);
+}
+
+// 로그인한 사용자 기준으로 채널 연결 (이미 연결돼 있으면 아무 일도 안 함)
+function ensureRealtime() {
+  if (!currentUser || typeof sb === 'undefined' || !sb.channel) return;
+  if (msgChannel && msgChannelUser === currentUser.id) return;
+  if (msgChannel) { sb.removeChannel(msgChannel); msgChannel = null; }
+
+  const me = currentUser.id;
+  const peerOf = r => (r && (r.from_id === me ? r.to_id : r.from_id)) || null;
+  msgChannelUser = me;
+  msgChannel = sb.channel(`khu-inbox-${me}`)
+    // 내가 받는 쪽지 (새 쪽지, 상대가 읽음 처리한 것 포함)
+    .on('postgres_changes', { event: '*', schema: 'public', table: MSG_TABLE, filter: `to_id=eq.${me}` },
+      p => scheduleRealtimeRefresh(peerOf(p.new ?? p.old)))
+    // 내가 보낸 쪽지 (다른 기기·탭에서 보낸 것, 상대가 읽은 표시)
+    .on('postgres_changes', { event: '*', schema: 'public', table: MSG_TABLE, filter: `from_id=eq.${me}` },
+      p => scheduleRealtimeRefresh(peerOf(p.new ?? p.old)))
+    // 룸메 신청 (받은 것)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'match_requests', filter: `to_id=eq.${me}` },
+      p => { scheduleRealtimeRefresh(peerOf(p.new ?? p.old)); window.dispatchEvent(new CustomEvent('khu:match-changed')); })
+    // 룸메 신청 (보낸 것)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'match_requests', filter: `from_id=eq.${me}` },
+      p => { scheduleRealtimeRefresh(peerOf(p.new ?? p.old)); window.dispatchEvent(new CustomEvent('khu:match-changed')); })
+    .subscribe(status => {
+      if (status === 'SUBSCRIBED') scheduleRealtimeRefresh();   // 연결 직후 한 번 맞춤
+      else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('[messages] 실시간 연결 실패, 주기 확인으로 대체');
+    });
+}
+
+// 주기적 확인(연결 끊김 대비) + 창으로 돌아오면 바로 확인
 setInterval(() => { if (currentUser) refreshMessages(); }, MSG_POLL_MS);
 window.addEventListener('focus', () => { if (currentUser) refreshMessages(); });

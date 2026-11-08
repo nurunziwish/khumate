@@ -322,7 +322,7 @@ const TOLERANCE = {
   clean_style:   { label: '공용 공간 청소 허용 방식', opts: [['as_needed', '필요할 때만 해도 괜찮아요'], ['often', '주기적으로 청소해주세요'], ['daily', '바로바로 청소해주세요']] },
   trash_style:   { label: '쓰레기 처리 허용 방식', opts: [['full', '다 찼을 때 비워도 괜찮아요'], ['regular', '모아서 주기적으로 비워도 괜찮아요'], ['immediate', '바로바로 비워주세요']] },
   tidy_level:    { label: '개인 공간 정리 허용 범위', opts: [['relaxed', '물건이 나와 있어도 괜찮아요'], ['normal', '어느 정도 어질러져도 괜찮아요'], ['neat', '항상 정돈된 편만 괜찮아요']] },
-  ventilation:   { label: '환기 허용 범위', opts: [['rarely', '거의 안 해도 괜찮아요'], ['sometimes', '가끔 환기까지 괜찮아요'], ['often', '자주 환기하는 편만 괜찮아요']] },
+  ventilation:   { label: '환기 허용 범위', opts: [['rarely', '거의 안 하면 좋겠어요'], ['sometimes', '가끔 환기까지 괜찮아요'], ['often', '자주 환기해도 괜찮아요']] },
   drinking:      { label: '음주 빈도 허용 범위', opts: [['none', '안 마시는 편만 괜찮아요'], ['rarely', '월 1~2회까지 괜찮아요'], ['weekly', '주 1~2회까지 괜찮아요'], ['often', '주 3회 이상 마셔도 괜찮아요']] },
   indoor_eating: { label: '실내 취식 허용 범위', opts: [['none', '방에서 안 먹는 편만 괜찮아요'], ['snack', '간식·음료까지 괜찮아요'], ['meal', '식사·배달음식도 괜찮아요']] },
   alarm_style:   { label: '기상 알람 허용 범위 [추가]', opts: [['silent', '알람 없이 무음만 괜찮아요'], ['once', '한 번에 끝나는 알람까지 괜찮아요'], ['multi', '여러 번 울리는 알람도 괜찮아요']] },

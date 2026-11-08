@@ -303,6 +303,104 @@ async function saveHouseItem(matchId, field, answer) {
   renderHouseRule();
 }
 
+// ---------- 상대의 하우스룰 변경 알림 ----------
+// 상대가 고친 항목은 updated_by가 상대 아이디. "마지막으로 확인한 시각"(이 기기 기준) 이후 변경만 알림.
+
+const houseSeenKey = matchId => `khu-house-seen-${matchId}`;
+function houseSeenAt(matchId) {
+  try { return localStorage.getItem(houseSeenKey(matchId)); } catch { return null; }
+}
+function setHouseSeen(matchId, iso) {
+  try { localStorage.setItem(houseSeenKey(matchId), iso); } catch { /* 저장 못 해도 알림만 다시 뜸 */ }
+}
+
+// 실시간 구독: 같은 신청이면 한 번만 연결
+function ensureHouseChannel(matchId) {
+  if (houseChannelMatch === matchId) return;
+  if (houseChannel) sb.removeChannel(houseChannel);
+  houseChannelMatch = matchId;
+  try {
+    houseChannel = sb.channel('house-rule-' + matchId).on('postgres_changes',
+      { event: '*', schema: 'public', table: 'house_rule_items', filter: `match_id=eq.${matchId}` },
+      p => onHouseRealtime(p)).subscribe();
+  } catch (e) { console.warn('[matches] 실시간 구독 실패:', e.message); }
+}
+
+// 실시간 변경 한 건 처리: 상대가 바꿨으면 토스트, 알림 줄·탭 점 갱신, 탭이 열려 있으면 화면 갱신
+async function onHouseRealtime(p) {
+  const row = p.new || {};
+  if (row.updated_by && row.updated_by !== currentUser?.id) {
+    showToast(`룸메이트가 하우스룰을 바꿨어요: ${houseFieldDef(row.field)?.label || row.field}`);
+  }
+  await updateHouseAlert();
+  if (!document.getElementById('content-houserule')?.classList.contains('hidden')) renderHouseRule();
+}
+
+// 상대가 바꾼 항목 목록 (내가 확인한 시각 이후 것만)
+async function fetchHouseChanges(matchId, myId) {
+  const { data, error } = await sb.from('house_rule_items').select('field, updated_by, updated_at')
+    .eq('match_id', matchId).neq('updated_by', myId);
+  if (error) throw error;
+  const seen = houseSeenAt(matchId);
+  if (!seen) {   // 처음 확인하는 기기: 지금까지의 변경은 알리지 않고 기준 시각만 저장
+    setHouseSeen(matchId, new Date().toISOString());
+    return [];
+  }
+  const seenMs = new Date(seen).getTime();
+  return (data || []).filter(r => new Date(r.updated_at).getTime() > seenMs);
+}
+
+// 알림 줄 (하우스룰 탭 맨 위, 탭 밖 본문 영역 위)
+function renderHouseAlert(matchId, changes) {
+  const el = document.getElementById('houserule-alert');
+  if (!el) return;
+  if (!matchId || !changes.length) { el.innerHTML = ''; return; }
+  const names = [...new Set(changes.map(c => houseFieldDef(c.field)?.label || c.field))];
+  const latest = changes.map(c => c.updated_at).sort().pop();
+  el.innerHTML = `
+    <div class="mt-6 rounded-2xl border border-red-200 bg-rose-50 p-4 flex items-start gap-3">
+      <div class="min-w-0 flex-1">
+        <p class="font-bold text-red-600 text-sm">룸메이트가 하우스룰을 바꿨어요</p>
+        <p class="text-xs text-slate-600 mt-1 break-words">${names.map(esc).join(', ')}</p>
+      </div>
+      <button type="button" data-match="${esc(matchId)}" data-seen="${esc(latest)}" onclick="confirmHouseChanges(this.dataset.match, this.dataset.seen)"
+        class="shrink-0 px-3 py-1.5 rounded-lg bg-red-600 text-white text-xs font-bold">확인</button>
+    </div>`;
+}
+
+// 탭 이름 옆 빨간 점 (상대 변경을 아직 안 봤을 때)
+function setHouseTabDot(on) {
+  const tab = document.getElementById('tab-houserule');
+  if (!tab) return;
+  const dot = tab.querySelector('#house-dot');
+  if (on && !dot) tab.insertAdjacentHTML('beforeend', '<span id="house-dot" class="inline-block ml-1 w-2 h-2 rounded-full bg-red-600 align-middle"></span>');
+  else if (!on && dot) dot.remove();
+}
+
+// 확인 버튼: 여기까지 봤다고 기록하고 알림 지움
+function confirmHouseChanges(matchId, seenIso) {
+  setHouseSeen(matchId, seenIso || new Date().toISOString());
+  updateHouseAlert();
+}
+
+// 확정된 룸메가 있으면 알림·탭 점 갱신 (로그인 후, 주기적으로, 창으로 돌아올 때 호출)
+async function updateHouseAlert() {
+  if (!currentUser) return;
+  try {
+    const m = await fetchAcceptedMatch(currentUser.id);
+    if (!m) { renderHouseAlert(null, []); setHouseTabDot(false); return; }
+    ensureHouseChannel(m.id);
+    const changes = await fetchHouseChanges(m.id, currentUser.id);
+    renderHouseAlert(m.id, changes);
+    setHouseTabDot(changes.length > 0);
+  } catch (e) {
+    console.warn('[matches] 하우스룰 변경 확인 실패:', e.message);
+  }
+}
+
+setInterval(() => { if (currentUser) updateHouseAlert(); }, 30000);
+window.addEventListener('focus', () => { if (currentUser) updateHouseAlert(); });
+
 // 드롭다운을 고르면 저장 (이벤트 위임: 다시 그려져도 동작)
 document.addEventListener('change', e => {
   if (!houseMatchId) return;
@@ -375,16 +473,7 @@ async function renderHouseRule() {
     try { saved = await fetchHouseItems(m.id); }
     catch (e) { console.warn('[matches] 하우스룰 답 불러오기 실패 (SQL 실행 여부 확인):', e.message); }
     houseMatchId = m.id;
-    // 상대가 고치면 바로 반영되도록 구독 (같은 신청이면 한 번만)
-    if (houseChannelMatch !== m.id) {
-      if (houseChannel) sb.removeChannel(houseChannel);
-      houseChannelMatch = m.id;
-      try {
-        houseChannel = sb.channel('house-rule-' + m.id).on('postgres_changes',
-          { event: '*', schema: 'public', table: 'house_rule_items', filter: `match_id=eq.${m.id}` },
-          () => renderHouseRule()).subscribe();
-      } catch (e) { console.warn('[matches] 실시간 구독 실패:', e.message); }
-    }
+    ensureHouseChannel(m.id);   // 상대가 고치면 바로 반영 (같은 신청이면 한 번만 구독)
     snaps.forEach(r => snapshotCache.set(r.owner_id, r));
     const mineRow = snaps.find(r => r.owner_id === currentUser.id);
     const partnerRow = snaps.find(r => r.owner_id !== currentUser.id);
