@@ -23,7 +23,7 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 const CHATBOT = { baseUrl: process.env.CHATBOT_BASE_URL, apiKey: process.env.CHATBOT_API_KEY, model: process.env.CHATBOT_MODEL };
 const AI_ENABLED = Boolean(CHATBOT.baseUrl && CHATBOT.apiKey && CHATBOT.model);
 const TOP_N = 20;          // AI 정밀 분석 대상 (규칙 점수 상위 N명)
-const AI_CHUNK = 20;       // AI 한 번에 보내는 사람 수 (TOP_N 이 20이면 한 번만 호출)
+const AI_CHUNK = 10;       // AI 한 번에 보내는 사람 수 (두 묶음을 동시에 보내서 시간 제한 안에 끝내기)
 const aiLimit = new ai.RateLimiter(10, 60 * 60 * 1000);   // 사람당 1시간에 10번
 
 const sameTime = (a, b) => new Date(a).getTime() === new Date(b).getTime();
@@ -62,6 +62,7 @@ app.post('/api/match-ai', async (req, res) => {
 
     // 2) 내 글 확인 (최신 질문지로 올린 글만)
     const { data: me } = await sb.from('roommate_posts').select('*').eq('user_id', uid).maybeSingle();
+    const myFp = me ? matching.cardFingerprint(me) : null;
     if (!me || (me.schema_version ?? 0) < SCHEMA_VERSION) {
       return res.status(400).json({ error: '최신 질문지로 글을 올린 뒤 이용할 수 있어요.' });
     }
@@ -84,7 +85,7 @@ app.post('/api/match-ai', async (req, res) => {
     const fresh = new Map();
     for (const c of cached || []) {
       const r = byId.get(c.target_id);
-      if (r && sameTime(c.viewer_updated, me.updated_at) && sameTime(c.target_updated, r.post.updated_at) && (c.prompt_ver ?? 1) >= ai.AI_PROMPT_VERSION) fresh.set(c.target_id, c);
+      if (r && c.viewer_fp === myFp && c.target_fp === matching.cardFingerprint(r.post) && (c.prompt_ver ?? 1) >= ai.AI_PROMPT_VERSION) fresh.set(c.target_id, c);
     }
 
     // 5) 캐시에 없는 사람만 AI에 나눠서 물어봄 (20명씩 순서대로, 한 묶음이 실패해도 앞 결과는 살림)
@@ -93,30 +94,35 @@ app.post('/api/match-ai', async (req, res) => {
     if (missing.length && !AI_ENABLED) {
       warning = 'AI 설정이 아직 없어서 규칙 점수만 보여드려요.';
     } else {
-      for (let i = 0; i < missing.length; i += AI_CHUNK) {
-        const chunk = missing.slice(i, i + AI_CHUNK);
-        try {
-          const text = await ai.callChatbot(CHATBOT, ai.buildMessages(me, chunk));
-          const parsed = ai.parseAiResults(text, chunk.map(r => r.post.user_id));
-          const rows = parsed.map(p => ({
-            viewer_id: uid,
-            target_id: p.user_id,
-            viewer_updated: me.updated_at,
-            target_updated: byId.get(p.user_id).post.updated_at,
-            adjust: p.adjust, summary: p.summary, analysis: p.analysis, good: p.good, warn: p.warn, talk: p.talk,
-            prompt_ver: ai.AI_PROMPT_VERSION,
-          }));
-          if (rows.length) {
-            const { error: upErr } = await sb.from('match_ai').upsert(rows, { onConflict: 'viewer_id,target_id' });
-            if (upErr) console.error('[match-ai] 캐시 저장 실패:', upErr.message);
-            rows.forEach(r => fresh.set(r.target_id, r));
-          }
-        } catch (e) {
-          console.error('[match-ai] AI 호출 실패:', e.message);
-          warning = 'AI 분석 일부가 실패해서 가능한 결과만 보여드려요. 잠시 후 다시 시도해 주세요.';
-          break;   // 이후 묶음은 건너뜀 (같은 원인으로 또 실패할 가능성이 큼)
+      const chunks = [];
+      for (let i = 0; i < missing.length; i += AI_CHUNK) chunks.push(missing.slice(i, i + AI_CHUNK));
+      // 묶음들을 동시에 보냄 (한 묶음이 실패해도 나머지 결과는 살림)
+      const outcomes = await Promise.allSettled(chunks.map(async chunk => {
+        const text = await ai.callChatbot(CHATBOT, ai.buildMessages(me, chunk));
+        const parsed = ai.parseAiResults(text, chunk.map(r => r.post.user_id));
+        if (parsed.length < chunk.length) console.warn(`[match-ai] 응답 ${parsed.length}/${chunk.length}명만 해석됨`);
+        const rows = parsed.map(p => ({
+          viewer_id: uid,
+          target_id: p.user_id,
+          viewer_updated: me.updated_at,
+          target_updated: byId.get(p.user_id).post.updated_at,
+          viewer_fp: myFp,
+          target_fp: matching.cardFingerprint(byId.get(p.user_id).post),
+          adjust: p.adjust, summary: p.summary, analysis: p.analysis, good: p.good, warn: p.warn, talk: p.talk,
+          prompt_ver: ai.AI_PROMPT_VERSION,
+        }));
+        if (rows.length) {
+          const { error: upErr } = await sb.from('match_ai').upsert(rows, { onConflict: 'viewer_id,target_id' });
+          if (upErr) console.error('[match-ai] 캐시 저장 실패:', upErr.message);
+          rows.forEach(r => fresh.set(r.target_id, r));
         }
-      }
+      }));
+      outcomes.forEach(o => {
+        if (o.status === 'rejected') {
+          console.error('[match-ai] AI 호출 실패:', o.reason?.message);
+          warning = 'AI 분석 일부가 실패해서 가능한 결과만 보여드려요. 잠시 후 다시 시도해 주세요.';
+        }
+      });
     }
 
     // 7-1) 상위 목록 전체 분석이면, 이번 순위를 저장 (분석 결과가 있는 카드만). 개별 카드 분석은 순위를 건드리지 않음
@@ -138,6 +144,8 @@ app.post('/api/match-ai', async (req, res) => {
         final: c ? ai.finalScore(ruleScore, c.adjust) : ruleScore,
         viewer_updated: me.updated_at,   // 분석 당시 내 글·상대 글 수정 시각 (클라이언트가 '변경 없음'을 판단)
         target_updated: r.post.updated_at,
+        viewer_fp: myFp,
+        target_fp: matching.cardFingerprint(r.post),
         summary: c ? c.summary : '',
         analysis: c?.analysis || '',
         good: c?.good || [],
@@ -199,6 +207,8 @@ app.get('/api/match-ai/saved', async (req, res) => {
         final: ai.finalScore(r.match.score, c.adjust),
         viewer_updated: c.viewer_updated,
         target_updated: c.target_updated,
+        viewer_fp: c.viewer_fp,
+        target_fp: c.target_fp,
         summary: c.summary || '',
         analysis: c.analysis || '',
         good: c.good || [],

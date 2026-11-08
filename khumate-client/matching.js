@@ -320,7 +320,7 @@ const DIMENSIONS = [
   { key: 'tidy', label: '정리 습관', weight: 6, uses: ['tidy_level', 'rm_tidy_level'],
     pref: (me, o) => strictFit(['neat', 'normal', 'relaxed'], me.rm_tidy_level, o.tidy_level), sim: ordinal(['neat', 'normal', 'relaxed']) },
   { key: 'ventilation', label: '환기', weight: 2, uses: ['ventilation', 'rm_ventilation'],
-    pref: (me, o) => nearestFit(['rarely', 'sometimes', 'often'])(me.rm_ventilation, o.ventilation), sim: ordinal(['rarely', 'sometimes', 'often']) },
+    pref: (me, o) => strictFit(['rarely', 'sometimes', 'often'], me.rm_ventilation, o.ventilation), sim: ordinal(['rarely', 'sometimes', 'often']) },
   { key: 'cold_vent', label: '환기·온도 궁합', weight: 2, uses: ['ventilation', 'temp_sensitivity'], sim: coldVentSim },
   { key: 'trash', label: '쓰레기 처리', weight: 4, uses: ['trash_style', 'trash_freq', 'rm_trash_style', 'rm_trash_freq'],
     pref: trashPref, sim: (a, b) => (a.trash_style && a.trash_style === b.trash_style) ? 1 : pairTable({ 'immediate|regular': .7, 'regular|full': .6, 'immediate|full': .3 })(a.trash_style, b.trash_style) },
@@ -433,7 +433,33 @@ function checkMatchCoverage(schema) {
   return missing;
 }
 
-if (typeof module !== 'undefined') module.exports = { MATCH_RULES, DIMENSIONS, MATCH_IGNORED, matchScore, rankMatches, canMatch, checkMatchCoverage, smokingConflict, MATCH_CONFLICT_FACTOR };
+// ---------- 카드 지문: 매칭에 쓰이는 내용(성별·거주 기간·학과·답변)이 바뀌었는지 확인용 ----------
+// 수정 시각·제목은 뺌 (내용이 같으면 시각이 바뀌어도 같은 지문). 서버와 화면이 같은 계산을 써야 해서 여기 한 곳에 둠
+function cyrb53(str, seed = 0) {
+  let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
+  for (let i = 0; i < str.length; i++) {
+    const ch = str.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507); h1 ^= Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507); h2 ^= Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(36);
+}
+// 키 순서와 상관없이 같은 문자열이 나오도록 정렬
+function canonicalJson(v) {
+  if (Array.isArray(v)) return v.map(canonicalJson);
+  if (v && typeof v === 'object') return Object.keys(v).sort().reduce((o, k) => (o[k] = canonicalJson(v[k]), o), {});
+  return v;
+}
+function cardFingerprint(post) {
+  if (!post) return null;
+  return cyrb53(JSON.stringify(canonicalJson({
+    gender: post.gender ?? null, dorm_period: post.dorm_period ?? null, dept: post.dept ?? null, answers: post.answers ?? {},
+  })));
+}
+
+if (typeof module !== 'undefined') module.exports = { cardFingerprint, cyrb53, MATCH_RULES, DIMENSIONS, MATCH_IGNORED, matchScore, rankMatches, canMatch, checkMatchCoverage, smokingConflict, MATCH_CONFLICT_FACTOR };
 
 // 카드 보기에서 내 답과 비교: 항목마다 내 허용 범위 안인지, 상대 허용 범위 안인지, 항목 점수
 function matchBreakdown(a, b) {

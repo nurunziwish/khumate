@@ -319,6 +319,7 @@ function renderList() {
 async function loadPosts() {
   const box = document.getElementById('card-list-container');
   if (!box) return;
+  ensurePostRealtime();   // 카드 변경 실시간 감지 (한 번만 연결)
   const seq = ++loadSeq;
   const uid = currentUser?.id ?? null;
   try {
@@ -482,7 +483,7 @@ async function openViewModal(userId) {
   // AI 분석 결과가 있으면 답안 위에 보여 줌 (로그인한 사용자만 있음)
   const ai = currentUser ? aiByUid.get(row.user_id) : null;
   const aiBox = document.getElementById('view-ai');
-  const aiOld = ai && currentUser && myPost && row.user_id !== currentUser.id && aiState(row.user_id, row.updated_at) === 'stale';
+  const aiOld = ai && currentUser && myPost && row.user_id !== currentUser.id && aiState(row.user_id, row) === 'stale';
   aiBox.innerHTML = ai ? (aiOld ? '<p class="text-[11px] text-rose-600 font-bold px-1">⚠ 카드가 바뀌기 전 기준으로 분석한 결과예요. 다시 분석해 보세요.</p>' : '') + aiBoxHtml(ai) : '';
   aiBox.classList.toggle('hidden', !ai);
   // 내 카드가 있고 남의 카드면 항목별 비교를 같이 보여 줌
@@ -603,7 +604,7 @@ function renderAiModal() {
   const rankChanged = !!aiBatchRank && [...aiBatchRank].some(([id, rk]) => curIds.indexOf(id) + 1 !== rk);
   // 분석 때 없던 카드가 상위 목록에 들어온 경우 (예: 10명이던 목록에 11등이 추가)
   const addedCount = aiBatchRank ? cands.filter(x => !aiBatchRank.has(x.post.user_id)).length : 0;
-  const allDone = n > 0 && !rankChanged && addedCount === 0 && cands.every(x => aiState(x.post.user_id, x.post.updated_at) === 'done');
+  const allDone = n > 0 && !rankChanged && addedCount === 0 && cands.every(x => aiState(x.post.user_id, x.post) === 'done');
   // 내 카드가 분석 뒤에 바뀌었으면 버튼 옆에 안내
   const msgs = [rankChanged ? '⚠ 관련도 순서가 바뀌었어요' : '', addedCount ? `➕ 새 카드 ${addedCount}명이 추가됐어요` : ''].filter(Boolean);
   // 안내 문구: 버튼 왼쪽 흰 줄에 한 줄씩 (왼쪽 정렬)
@@ -611,6 +612,7 @@ function renderAiModal() {
   if (notesEl) notesEl.innerHTML = msgs.map(m => `<p class="text-xs font-bold text-rose-600 leading-snug">${m}</p>`).join('');
   btn.disabled = aiRunning || n === 0 || allDone;
   btn.textContent = aiRunning ? '분석 중…' : allDone ? '✔ 분석 최신 상태' : aiLatest ? '🔄 다시 분석' : '▶ 분석 시작';
+  if (aiLatest) aiLatest = aiLatest.filter(r => curIds.includes(r.user_id));   // 분석 대상에서 빠진 카드(비공개 등)는 결과에서도 뺌
   body.innerHTML = aiBodyHtml(n);
 }
 
@@ -653,7 +655,7 @@ function aiCardHtml(r, rank) {
   const tone = r.final >= 80 ? 'text-red-600' : r.final >= 60 ? 'text-orange-500' : 'text-slate-500';
   const adj = r.adjust > 0 ? `+${r.adjust}` : `${r.adjust}`;
   const adjTone = r.adjust > 0 ? 'text-emerald-600' : r.adjust < 0 ? 'text-rose-500' : 'text-slate-400';
-  const targetChanged = !!r.target_updated && new Date(r.target_updated).getTime() !== new Date(post.updated_at).getTime();   // 이 카드(상대)만 바뀐 경우
+  const targetChanged = !!r.target_fp && r.target_fp !== cardFingerprint(post);   // 이 카드(상대)만 바뀐 경우
   const meta = [post.dept, `${post.student_id}학번`, `${post.birth_year}년생`].filter(Boolean).map(esc).join(' · ');
   const good = (r.good || []).map(g => `<span class="px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-700 text-[11px] font-bold border border-emerald-100">✔ ${esc(g)}</span>`).join('');
   const warn = (r.warn || []).map(w => `<span class="px-2 py-0.5 rounded-md bg-amber-50 text-amber-700 text-[11px] font-bold border border-amber-100">⚠ ${esc(w)}</span>`).join('');
@@ -739,7 +741,7 @@ function refreshViewAi() {
   if (!row) return;
   const ai = currentUser ? aiByUid.get(row.user_id) : null;
   const aiBox = document.getElementById('view-ai');
-  const stale = !!ai && !!currentUser && !!myPost && row.user_id !== currentUser.id && aiState(row.user_id, row.updated_at) === 'stale';
+  const stale = !!ai && !!currentUser && !!myPost && row.user_id !== currentUser.id && aiState(row.user_id, row) === 'stale';
   aiBox.innerHTML = ai ? (stale ? '<p class="text-[11px] text-rose-600 font-bold px-1">⚠ 카드가 바뀌기 전 기준으로 분석한 결과예요. 다시 분석해 보세요.</p>' : '') + aiBoxHtml(ai) : '';
   aiBox.classList.toggle('hidden', !ai);
   renderViewAiFooter();
@@ -748,11 +750,12 @@ function refreshViewAi() {
 // 지금 보고 있는 카드 (AI 버튼 상태 계산용)
 let viewRowCtx = null;
 // 이 카드를 지금 내 글·상대 글 기준으로 분석했는지: 'done'(변경 없음) / 'stale'(바뀌었거나 이전 분석) / 'none'(분석 전)
-function aiState(userId, targetUpdated) {
+function aiState(userId, post) {
   const r = aiByUid.get(userId);
   if (!r) return 'none';
-  const sameT = (x, y) => !!x && !!y && new Date(x).getTime() === new Date(y).getTime();
-  return myPost && sameT(r.viewer_updated, myPost.updated_at) && sameT(r.target_updated, targetUpdated) ? 'done' : 'stale';
+  // 내용 지문 비교: 내 카드 내용 또는 상대 카드 내용이 바뀌었을 때만 'stale' (수정 시각만 바뀐 건 무시)
+  if (!myPost || !post || !r.viewer_fp || !r.target_fp) return 'stale';
+  return r.viewer_fp === cardFingerprint(myPost) && r.target_fp === cardFingerprint(post) ? 'done' : 'stale';
 }
 // 보기 창 하단 AI 버튼: 분석 전 = 활성, 분석 후 변경 없음 = 회색(누르면 안내), 카드가 바뀌었으면 알림 + 활성
 function renderViewAiFooter() {
@@ -760,7 +763,7 @@ function renderViewAiFooter() {
   const row = viewRowCtx;
   if (!footer || !row || !myPost || !currentUser || row.user_id === currentUser.id) return;
   const sameCond = row.gender === myPost.gender && row.dorm_period === myPost.dorm_period;
-  const st = aiState(row.user_id, row.updated_at);
+  const st = aiState(row.user_id, row);
   const done = st === 'done';
   const btnCls = done ? 'bg-slate-300 text-slate-600 cursor-not-allowed' : 'bg-gradient-to-r from-red-600 to-orange-500 hover:shadow-lg text-white';
   const label = done ? '✔ 분석 완료 (카드 변경 없음)' : '🤖 AI 정밀 분석';
@@ -774,7 +777,7 @@ let aiSingleRunning = false;
 async function runSingleAi(userId, sameCond) {
   if (!sameCond) return khuAlert('성별 또는 거주 기간이 달라서 AI 정밀 분석을 할 수 없어요.\n같은 성별·같은 거주 기간의 카드만 분석할 수 있어요.');
   if (aiSingleRunning || !currentUser) return;
-  if (aiState(userId, viewRowCtx?.updated_at) === 'done') return khuAlert('이미 분석한 상태예요.\n카드 내용이 바뀌면 다시 분석할 수 있어요.');
+  if (aiState(userId, viewRowCtx) === 'done') return khuAlert('이미 분석한 상태예요.\n카드 내용이 바뀌면 다시 분석할 수 있어요.');
   aiSingleRunning = true;
   const btn = document.getElementById('view-ai-btn');
   if (btn) { btn.disabled = true; btn.textContent = '🤖 AI 분석 중… (최대 1분)'; }
@@ -1090,3 +1093,26 @@ window.addEventListener('khu:match-changed', e => {
     if (!document.getElementById('content-houserule')?.classList.contains('hidden') && typeof renderHouseRule === 'function') renderHouseRule();
   }, 200);
 });
+
+// ---------- 카드 변경 실시간 감지: 상대·내 카드가 바뀌면 AI '다시 분석' 상태를 바로 갱신 ----------
+// 연결 후 RLS에 맞는 카드만 전달됨 (게시된 다른 사람 카드 + 내 카드)
+let postChannel = null, postRefreshTimer = null;
+function ensurePostRealtime() {
+  if (postChannel || typeof sb === 'undefined' || !sb.channel) return;
+  try {
+    postChannel = sb.channel('khu-posts').on('postgres_changes',
+      { event: '*', schema: 'public', table: POSTS_TABLE },
+      p => onPostRealtime(p.new && p.new.user_id ? p.new : p.old)).subscribe();
+  } catch (e) { console.warn('[script] 카드 실시간 구독 실패:', e.message); }
+}
+function onPostRealtime(row) {
+  if (!row || !row.user_id) return;
+  // 열려 있는 카드 창의 수정 시각을 바로 맞춰서 버튼 상태(다시 분석 가능 여부)를 갱신
+  if (viewRowCtx && viewRowCtx.user_id === row.user_id) viewRowCtx = { ...viewRowCtx, ...row };
+  clearTimeout(postRefreshTimer);
+  postRefreshTimer = setTimeout(async () => {
+    await loadPosts();                       // 목록·내 카드·분석 상태 다시 계산
+    if (viewRowCtx) renderViewAiFooter();
+    if (!document.getElementById('ai-modal')?.classList.contains('hidden')) renderAiModal();
+  }, 300);
+}
