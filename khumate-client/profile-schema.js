@@ -104,14 +104,14 @@ const PROFILE_SCHEMA = [
         ],
       },
       {
-        name: 'stay_days', label: '주로 상주하는 요일 (중복 선택)', type: 'checkbox', cols: 7, default: [],
+        name: 'stay_days', label: '주로 상주하는 요일', type: 'checkbox', cols: 7, default: [],
         options: list(['월', '화', '수', '목', '금', '토', '일']),
         hint: '기숙사 방에 주로 머무르는 요일을 모두 골라 주세요.',
       },
       {
         type: 'group', label: '샤워', grid: 'grid-cols-[1.5fr_1fr]',
         fields: [
-          { name: 'shower_time', sublabel: '시간대 (중복 선택)', type: 'checkbox', cols: 3, default: [],
+          { name: 'shower_time', sublabel: '시간대', type: 'checkbox', cols: 3, default: [],
             options: [o('morning', '아침'), o('evening', '저녁')] },
           { name: 'shower_duration', sublabel: '소요 시간', type: 'select', placeholder: '선택',
             options: [o('5', '5분 이내'), o('10', '10분'), o('15', '15분'), o('20', '20분'), o('30', '30분'), o('40', '40분 이상')] },
@@ -318,14 +318,14 @@ const TOLERANCE = {
   room_stay:     { label: '방에 머무는 정도 허용 범위', opts: [['low', '외출형만 괜찮아요', '주로 밖에 있는 룸메이트'], ['medium', '반반형까지 괜찮아요', '적당히 외출하고 들어오는 룸메이트'], ['high', '방콕형도 괜찮아요', '수업 외 대부분 방에 있어도 괜찮아요']] },
   media_style:   { label: '음악·영상 소리 허용 범위', opts: [['earphone', '이어폰·헤드폰만 괜찮아요', '스피커 소리는 힘들어요'], ['speaker_low', '작은 스피커까지 괜찮아요', '낮에 작게 트는 정도'], ['speaker_free', '스피커를 자유롭게 틀어도 괜찮아요']] },
   call_style:    { label: '통화 허용 범위', opts: [['outside', '밖에서 하는 통화만 괜찮아요', '방 안 통화는 힘들어요'], ['short_quiet', '짧고 조용한 통화까지 괜찮아요', '방에서 짧게 하는 정도'], ['free', '방에서 자유롭게 통화해도 괜찮아요']] },
-  snoring:       { label: '코골이·이갈이 허용 범위 [추가]', opts: [['none', '없어야 해요'], ['sometimes', '가끔은 괜찮아요'], ['often', '자주 있어도 괜찮아요']] },
+  snoring:       { label: '코골이·이갈이 허용 범위', opts: [['none', '없어야 해요'], ['sometimes', '가끔은 괜찮아요'], ['often', '자주 있어도 괜찮아요']] },
   clean_style:   { label: '공용 공간 청소 허용 방식', opts: [['as_needed', '필요할 때만 해도 괜찮아요'], ['often', '주기적으로 청소해주세요'], ['daily', '바로바로 청소해주세요']] },
   trash_style:   { label: '쓰레기 처리 허용 방식', opts: [['full', '다 찼을 때 비워도 괜찮아요'], ['regular', '모아서 주기적으로 비워도 괜찮아요'], ['immediate', '바로바로 비워주세요']] },
   tidy_level:    { label: '개인 공간 정리 허용 범위', opts: [['relaxed', '물건이 나와 있어도 괜찮아요'], ['normal', '어느 정도 어질러져도 괜찮아요'], ['neat', '항상 정돈된 편만 괜찮아요']] },
   ventilation:   { label: '환기 허용 범위', opts: [['rarely', '거의 안 하면 좋겠어요'], ['sometimes', '가끔 환기까지 괜찮아요'], ['often', '자주 환기해도 괜찮아요']] },
   drinking:      { label: '음주 빈도 허용 범위', opts: [['none', '안 마시는 편만 괜찮아요'], ['rarely', '월 1~2회까지 괜찮아요'], ['weekly', '주 1~2회까지 괜찮아요'], ['often', '주 3회 이상 마셔도 괜찮아요']] },
   indoor_eating: { label: '실내 취식 허용 범위', opts: [['none', '방에서 안 먹는 편만 괜찮아요'], ['snack', '간식·음료까지 괜찮아요'], ['meal', '식사·배달음식도 괜찮아요']] },
-  alarm_style:   { label: '기상 알람 허용 범위 [추가]', opts: [['silent', '알람 없이 무음만 괜찮아요'], ['once', '한 번에 끝나는 알람까지 괜찮아요'], ['multi', '여러 번 울리는 알람도 괜찮아요']] },
+  alarm_style:   { label: '기상 알람 허용 범위', opts: [['silent', '알람 없이 무음만 괜찮아요'], ['once', '한 번에 끝나는 알람까지 괜찮아요'], ['multi', '여러 번 울리는 알람도 괜찮아요']] },
 };
 for (const [name, t] of Object.entries(TOLERANCE)) {
   RM_OVERRIDE[name] = { type: 'radio', noAny: true, list: true, label: t.label, options: t.opts.map(([v, l, d]) => o(v, l, d)) };
