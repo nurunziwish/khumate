@@ -274,7 +274,7 @@ function renderList() {
   const mineBox = document.getElementById('my-post-container');
   if (!box || !mineBox || !listState) return;
   updateSortButtons();
-  const openBtn = '<button onclick="openProfileEdit()" class="ml-1 underline">내 정보 작성하기</button>';
+  const openBtn = '';   // 안내 줄의 "내 정보 작성하기" 버튼 제거
   const loginBtn = '<button onclick="openAuthModal(\'login\')" class="ml-1 underline">로그인하기</button>';
 
   // 내 글은 필터 줄 아래 별도 칸에 표시 (목록에는 넣지 않음)
