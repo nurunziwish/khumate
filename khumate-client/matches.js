@@ -314,6 +314,16 @@ function setHouseSeen(matchId, iso) {
   try { localStorage.setItem(houseSeenKey(matchId), iso); } catch { /* 저장 못 해도 알림만 다시 뜸 */ }
 }
 
+// 저장된 칸 이름(예: "아이디:wake_time" 또는 "clean_style") → 사람이 읽는 항목 이름
+function houseChangeLabel(field) {
+  const raw = String(field || '');
+  const name = raw.includes(':') ? raw.slice(raw.lastIndexOf(':') + 1) : raw;
+  if (HOUSE_PAIR_LABEL[name]) return HOUSE_PAIR_LABEL[name];
+  const def = houseFieldDef(name);
+  const text = def?.label || def?.sublabel || name;
+  return String(text).replace(/<[^>]+>/g, '').trim() || name;
+}
+
 // 실시간 구독: 같은 신청이면 한 번만 연결
 function ensureHouseChannel(matchId) {
   if (houseChannelMatch === matchId) return;
@@ -330,7 +340,7 @@ function ensureHouseChannel(matchId) {
 async function onHouseRealtime(p) {
   const row = p.new || {};
   if (row.updated_by && row.updated_by !== currentUser?.id) {
-    showToast(`룸메이트가 하우스룰을 바꿨어요: ${houseFieldDef(row.field)?.label || row.field}`);
+    showToast(`룸메이트가 하우스룰을 바꿨어요: ${houseChangeLabel(row.field)}`);
   }
   await updateHouseAlert();
   if (!document.getElementById('content-houserule')?.classList.contains('hidden')) renderHouseRule();
@@ -355,7 +365,7 @@ function renderHouseAlert(matchId, changes) {
   const el = document.getElementById('houserule-alert');
   if (!el) return;
   if (!matchId || !changes.length) { el.innerHTML = ''; return; }
-  const names = [...new Set(changes.map(c => houseFieldDef(c.field)?.label || c.field))];
+  const names = [...new Set(changes.map(c => houseChangeLabel(c.field)))];
   const latest = changes.map(c => c.updated_at).sort().pop();
   el.innerHTML = `
     <div class="mt-6 rounded-2xl border border-red-200 bg-rose-50 p-4 flex items-start gap-3">
