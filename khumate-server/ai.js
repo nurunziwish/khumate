@@ -119,15 +119,30 @@ class RateLimiter {
 // OpenAI 호환 형식으로 게이트웨이 호출 → 응답 문장 한 덩어리
 async function callChatbot({ baseUrl, apiKey, model }, messages, fetchImpl = fetch) {
   const url = `${String(baseUrl).replace(/\/+$/, '')}/chat/completions/`;
-  const res = await fetchImpl(url, {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages, temperature: 0 }),
-    signal: AbortSignal.timeout(60000),   // 20명 분석은 30초를 넘을 수 있어서 60초
-  });
-  if (!res.ok) throw new Error(`AI 응답 오류 ${res.status}`);
-  const data = await res.json();
-  return data?.choices?.[0]?.message?.content ?? '';
+  let lastErr = null;
+  // 일시적 실패(시간 초과, 429, 5xx, 네트워크)는 한 번 더 시도. 총 시간은 Vercel 제한(60초) 안에 맞춤
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      const res = await fetchImpl(url, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model, messages, temperature: 0 }),
+        signal: AbortSignal.timeout(25000),   // 묶음을 10명씩 나눠 보내므로 25초면 충분
+      });
+      if (!res.ok) {
+        // 게이트웨이가 준 이유(짧게)를 같이 남김 — 키·모델 이름 문제인지 확인용. 키 값은 포함되지 않음
+        const why = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
+        throw new Error(`AI 응답 오류 ${res.status}${why ? ` - ${why}` : ''}`);
+      }
+      const data = await res.json();
+      return data?.choices?.[0]?.message?.content ?? '';
+    } catch (e) {
+      lastErr = e;
+      console.warn(`[ai] 호출 ${attempt}회 실패: ${e.name}: ${e.message}`);
+      if (attempt < 2) await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+  throw lastErr;
 }
 
 module.exports = { AI_PROMPT_VERSION, SYSTEM_PROMPT, summarizeAnswers, buildMessages, parseAiResults, finalScore, RateLimiter, callChatbot };
