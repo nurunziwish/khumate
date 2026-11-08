@@ -555,7 +555,7 @@ function onMessageClick() {
 async function onNoteClick() {
   const btn = document.getElementById('view-msg-btn');
   if (!currentUser) return khuAlert('로그인 후 쪽지를 보낼 수 있어요.');
-  if (!(await requirePublishedCard())) return;   // 내 카드가 공개 중이 아니면 안내 팝업만 띄움
+  if (!(await canMessage(btn.dataset.peer))) return;   // 이미 대화한 상대는 내 카드 공개와 상관없이 가능 (messages.js)
   closeViewModal();
   openThread(btn.dataset.peer, btn.dataset.title);
 }

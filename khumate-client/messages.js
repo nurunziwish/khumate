@@ -34,6 +34,26 @@ async function deleteThread(peerId) {
   if (error) throw error;
 }
 
+// 이미 쪽지를 주고받은 상대인지 (내가 채팅방을 지웠어도 대화 기록이 있으면 true)
+async function hasThread(myId, peerId) {
+  const { count, error } = await sb.from(MSG_TABLE).select('id', { count: 'exact', head: true })
+    .or(`and(from_id.eq.${myId},to_id.eq.${peerId}),and(from_id.eq.${peerId},to_id.eq.${myId})`);
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
+// 쪽지 보낼 수 있는지: 이미 대화한 상대면 내 카드 공개 여부와 상관없이 가능.
+// 처음 보내는 상대라면 내 카드가 공개 중이어야 함 (기존 규칙)
+async function canMessage(peerId) {
+  if (!currentUser || !peerId) return false;
+  try {
+    if (await hasThread(currentUser.id, peerId)) return true;
+  } catch (e) {
+    console.warn('[messages] 대화 기록 확인 실패:', e.message);
+  }
+  return requirePublishedCard();
+}
+
 // 상대 한 명과 주고받은 쪽지 (오래된 순, 내가 삭제한 시점 이전 것은 제외)
 async function fetchThread(myId, peerId) {
   const { data, error } = await sb.from(MSG_TABLE).select('*')
@@ -48,7 +68,7 @@ async function fetchThread(myId, peerId) {
 // 상대 카드 정보 한 줄: 성별 / 거주 기간 / 학번 / 년생 / 학과
 const cardInfoLine = p => p
   ? [p.gender, p.dorm_period, p.student_id ? `${p.student_id}학번` : '', p.birth_year ? `${p.birth_year}년생` : '', p.dept].filter(Boolean).join(' / ')
-  : '(카드가 없는 사용자)';
+  : '(카드 비공개 또는 없음)';
 // 채팅 목록 제목: 게시글 제목 대신 카드 정보 한 줄
 async function peerTitles(ids) {
   const map = new Map();
@@ -75,7 +95,7 @@ async function fetchInbox(myId) {
   }
   const convs = [...map.values()];
   const titles = await peerTitles(convs.map(c => c.peer));
-  convs.forEach(c => { c.title = titles.get(c.peer) ?? '(글이 삭제된 사용자)'; });
+  convs.forEach(c => { c.title = titles.get(c.peer) ?? '(카드 비공개 또는 없음)'; });
   return convs;
 }
 
@@ -141,8 +161,10 @@ async function renderInbox() {
               <p class="font-bold text-slate-800 truncate flex-1">${esc(c.title)}</p>
               ${c.unread ? `<span class="shrink-0 px-1.5 py-0.5 rounded-full bg-red-600 text-white text-[10px] font-bold">${c.unread}</span>` : ''}
             </div>
-            <p class="text-xs text-slate-500 truncate mt-0.5">${esc(preview)}</p>
-            <p class="text-[10px] text-slate-400 mt-1.5">${timeLabel(c.last.created_at)}</p>
+            <div class="flex items-center gap-2 min-w-0 mt-0.5">
+              <p class="text-xs text-slate-500 truncate flex-1 min-w-0">${esc(preview)}</p>
+              <p class="shrink-0 text-[10px] text-slate-400 whitespace-nowrap">${timeLabel(c.last.created_at)}</p>
+            </div>
           </button>
           <button type="button" title="채팅방 삭제" aria-label="채팅방 삭제" data-peer="${esc(c.peer)}" onclick="deleteThreadFromInbox(this)" class="absolute top-3 right-3 w-8 h-8 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 flex items-center justify-center">
             <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
@@ -181,7 +203,7 @@ async function setThreadTitle(peerId) {
     const p = await fetchPostById(peerId);
     el.textContent = p
       ? [p.gender, p.dorm_period, p.student_id ? `${p.student_id}학번` : '', p.birth_year ? `${p.birth_year}년생` : '', p.dept].filter(Boolean).join(' / ')
-      : '(카드가 없는 사용자)';
+      : '(카드 비공개 또는 없음)';
   } catch { el.textContent = '쪽지'; }
 }
 
@@ -240,7 +262,7 @@ async function sendThreadMessage() {
   const input = document.getElementById('thread-input');
   const btn = document.getElementById('thread-send');
   if (!msgPeer || !currentUser) return;
-  if (!(await requirePublishedCard())) return;
+  if (!(await canMessage(msgPeer))) return;
   btn.disabled = true;
   try {
     await sendMessage(currentUser.id, msgPeer, input.value);
