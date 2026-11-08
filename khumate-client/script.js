@@ -1077,3 +1077,20 @@ checkMatchCoverage(PROFILE_SCHEMA.filter(s => sectionScope(s) === 'me'));   // �
 // auth.js 가 로그인 상태를 알려 주는 시점이 이 파일이 로드되기보다 빠르면 놓칠 수 있으므로,
 // 시작할 때 현재 세션을 한 번 직접 확인 (같은 사용자면 onAuthChanged 가 중복 로딩을 막아 줌)
 sb.auth.getSession().then(({ data }) => onAuthChanged(data.session));
+// ---------- 룸메 확정·해제 시 자동 새로고침 ----------
+// messages.js 가 match_requests 변화(신청·수락·해제)를 받으면 'khu:match-changed' 이벤트를 보냄
+let matchRefreshTimer = null;
+window.addEventListener('khu:match-changed', e => {
+  // 상대가 확정을 해제한 경우 (확정 → ended, 내가 한 해제는 제외) 알림
+  const before = e.detail?.old, after = e.detail?.new;
+  if (before?.status === 'accepted' && after?.status === 'ended' && typeof myReleaseIds !== 'undefined' && !myReleaseIds.has(after.id)) {
+    khuAlert('상대가 룸메 확정을 해제했어요.\n확정된 기록은 지워졌고, 내 카드는 다시 목록에 올라가요.');
+  }
+  clearTimeout(matchRefreshTimer);
+  matchRefreshTimer = setTimeout(async () => {
+    try { await loadPosts(); } catch (e) { console.warn('[script] 목록 새로고침 실패:', e.message); }   // 확정 여부에 따라 카드·목록 갱신
+    if (typeof renderMatchRequests === 'function') renderMatchRequests().catch(() => {});                 // 매칭 요청 목록
+    if (typeof updateHouseAlert === 'function') updateHouseAlert();                                       // 하우스룰 알림·탭 점
+    if (!document.getElementById('content-houserule')?.classList.contains('hidden') && typeof renderHouseRule === 'function') renderHouseRule();
+  }, 200);
+});

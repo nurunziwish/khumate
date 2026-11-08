@@ -325,10 +325,10 @@ function ensureRealtime() {
       p => scheduleRealtimeRefresh(peerOf(p.new ?? p.old)))
     // 룸메 신청 (받은 것)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'match_requests', filter: `to_id=eq.${me}` },
-      p => { scheduleRealtimeRefresh(peerOf(p.new ?? p.old)); window.dispatchEvent(new CustomEvent('khu:match-changed')); })
+      p => { scheduleRealtimeRefresh(peerOf(p.new ?? p.old)); window.dispatchEvent(new CustomEvent('khu:match-changed', { detail: p })); })
     // 룸메 신청 (보낸 것)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'match_requests', filter: `from_id=eq.${me}` },
-      p => { scheduleRealtimeRefresh(peerOf(p.new ?? p.old)); window.dispatchEvent(new CustomEvent('khu:match-changed')); })
+      p => { scheduleRealtimeRefresh(peerOf(p.new ?? p.old)); window.dispatchEvent(new CustomEvent('khu:match-changed', { detail: p })); })
     .subscribe(status => {
       if (status === 'SUBSCRIBED') scheduleRealtimeRefresh();   // 연결 직후 한 번 맞춤
       else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') console.warn('[messages] 실시간 연결 실패, 주기 확인으로 대체');

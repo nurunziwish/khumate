@@ -207,6 +207,8 @@ async function onThreadMatchClick() {
 
 // ---------- 확정 해제 ----------
 
+const myReleaseIds = new Set();   // 이 화면에서 내가 직접 해제한 신청 (상대 해제 알림에서 제외)
+
 async function releaseMatchRequest(id) {
   const { error } = await sb.from(MATCH_REQ_TABLE).update({ status: 'ended' }).eq('id', id);
   if (error) throw error;
@@ -214,6 +216,7 @@ async function releaseMatchRequest(id) {
 
 async function onReleaseMatch(id) {
   if (!(await khuConfirm('룸메 확정을 해제할까요?\n확정된 기록은 지워지고, 두 사람 모두 다시 룸메 신청을 할 수 있어요.\n카드는 다시 게시되어 목록에 올라가요.'))) return;
+  myReleaseIds.add(id);
   try { await releaseMatchRequest(id); }
   catch (e) { return showToast(e.message || '해제하지 못했어요.'); }
   showToast('룸메 확정을 해제했어요.');
@@ -253,7 +256,7 @@ const HOUSE_GROUPS = [
     { kind: 'select', name: 'drinking', label: '음주' },
   ] },
 ];
-const HOUSE_PAIR_LABEL = { wake_time: '기상', sleep_time: '취침', shower_time: '샤워' };
+const HOUSE_PAIR_LABEL = { wake_time: '기상', sleep_time: '취침', shower_time: '샤워 시간대', shower_duration: '샤워 시간' };
 
 // 스키마에서 질문 정의 찾기 (그룹 안까지)
 function houseFieldDef(name) {
